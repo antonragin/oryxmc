@@ -295,7 +295,7 @@ def api_simulate():
 
         allocations = clean_allocations
         total = sum(allocations.values())
-        if not math.isfinite(total) or abs(total - 1.0) > ALLOCATION_TOLERANCE:
+        if not math.isfinite(total) or abs(total - 1.0) > ALLOCATION_TOLERANCE + 1e-9:
             return jsonify({"error": f"Alocações devem somar 100% (atual: {total*100:.1f}%)"}), 400
 
         # Build portfolio returns with substitution

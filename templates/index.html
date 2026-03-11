@@ -689,7 +689,7 @@
         }
 
         function isAllocationTotalValid(totalPct) {
-            return Number.isFinite(totalPct) && Math.abs(totalPct - 100) <= ALLOCATION_TOLERANCE_PCT;
+            return Number.isFinite(totalPct) && Math.abs(totalPct - 100) <= ALLOCATION_TOLERANCE_PCT + 1e-6;
         }
 
         function updateTotal() {
