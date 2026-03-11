@@ -318,6 +318,18 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     sampled_returns = portfolio_returns[sampled_idx]
     sampled_real_returns = (1.0 + sampled_returns) / (1.0 + sampled_ipca) - 1.0
 
+    # Debug diagnostics
+    _diag = {
+        "sampled_idx_dtype": str(sampled_idx.dtype),
+        "sampled_idx_min": int(sampled_idx.min()),
+        "sampled_idx_max": int(sampled_idx.max()),
+        "sampled_returns_min": float(sampled_returns.min()),
+        "sampled_returns_max": float(sampled_returns.max()),
+        "sampled_returns_mean": float(sampled_returns.mean()),
+        "sampled_returns_shape": list(sampled_returns.shape),
+        "cum_inflation_max": float(cum_inflation.max()),
+    }
+
     # Portfolio trajectories
     traj_nominal = simulate_nominal_paths(sampled_returns)
     traj_real = traj_nominal.copy()
@@ -438,6 +450,12 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
         return stats
 
+    _diag["traj_nominal_min"] = float(traj_nominal.min())
+    _diag["traj_nominal_max"] = float(traj_nominal.max())
+    _diag["traj_nominal_median_final"] = float(np.median(traj_nominal[:, -1]))
+    _diag["traj_real_min"] = float(traj_real.min())
+    _diag["traj_real_max"] = float(traj_real.max())
+
     nominal_stats = compute_stats(traj_nominal, sampled_returns,
                                   benchmark_nominal, sampled_benchmark)
     real_stats = compute_stats(traj_real, sampled_real_returns,
@@ -454,4 +472,5 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         },
         "nominal": nominal_stats,
         "real": real_stats,
+        "_engine_diag": _diag,
     }
