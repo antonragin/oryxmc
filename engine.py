@@ -96,19 +96,7 @@ def validate_data(data):
         raise ValueError(
             f"IPCA incompleto na janela-alvo: {missing_ipca[0]} ... {missing_ipca[-1]}"
         )
-    for cat, fallback in CATEGORY_FALLBACKS.items():
-        if fallback not in indices:
-            raise ValueError(f"Fallback ausente para {cat}: {fallback}")
-        fb_info = indices[fallback]
-        if fb_info.get("category") != cat:
-            raise ValueError(
-                f"Fallback {fallback} pertence a {fb_info.get('category')}, esperado {cat}"
-            )
-        missing_fb = [m for m in target_months if m not in fb_info["returns"]]
-        if missing_fb:
-            raise ValueError(
-                f"Fallback {fallback} incompleto: {missing_fb[0]} ... {missing_fb[-1]}"
-            )
+    # Validate every index structure/data first
     for key, info in indices.items():
         if not isinstance(info, dict):
             raise ValueError(f"Índice inválido: {key}")
@@ -129,6 +117,20 @@ def validate_data(data):
         if info["start_date"] != months[0] or info["end_date"] != months[-1]:
             raise ValueError(
                 f"{key}: start/end inconsistentes ({info['start_date']} a {info['end_date']})"
+            )
+    # Then validate fallback coverage (now safe because all indices are validated)
+    for cat, fallback in CATEGORY_FALLBACKS.items():
+        if fallback not in indices:
+            raise ValueError(f"Fallback ausente para {cat}: {fallback}")
+        fb_info = indices[fallback]
+        if fb_info["category"] != cat:
+            raise ValueError(
+                f"Fallback {fallback} pertence a {fb_info['category']}, esperado {cat}"
+            )
+        missing_fb = [m for m in target_months if m not in fb_info["returns"]]
+        if missing_fb:
+            raise ValueError(
+                f"Fallback {fallback} incompleto: {missing_fb[0]} ... {missing_fb[-1]}"
             )
 
 
@@ -296,8 +298,14 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
     portfolio_returns = np.asarray(portfolio_returns, dtype=float)
     ipca = np.asarray(ipca, dtype=float)
-    if len(portfolio_returns) != len(ipca):
+    if portfolio_returns.ndim != 1 or ipca.ndim != 1:
+        raise ValueError("Séries históricas devem ser vetores 1D")
+    if portfolio_returns.size == 0 or ipca.size == 0:
+        raise ValueError("Séries históricas vazias")
+    if portfolio_returns.size != ipca.size:
         raise ValueError("Séries históricas desalinhadas")
+    if not np.all(np.isfinite(portfolio_returns)) or not np.all(np.isfinite(ipca)):
+        raise ValueError("Séries históricas contêm valores não-finitos")
 
     rng = np.random.default_rng(seed)
 
@@ -308,8 +316,10 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
     if benchmark_returns is not None:
         benchmark_returns = np.asarray(benchmark_returns, dtype=float)
-        if len(benchmark_returns) != n_hist:
+        if benchmark_returns.ndim != 1 or benchmark_returns.size != n_hist:
             raise ValueError("Benchmark desalinhado com o histórico")
+        if not np.all(np.isfinite(benchmark_returns)):
+            raise ValueError("Benchmark contém valores não-finitos")
 
     # Bootstrap: sample month indices with replacement
     sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))

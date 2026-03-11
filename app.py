@@ -3,6 +3,7 @@ import os
 import math
 import hmac
 import secrets
+from urllib.parse import urlsplit
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
 from functools import wraps
@@ -126,6 +127,22 @@ def add_security_headers(response):
     return response
 
 
+@app.before_request
+def check_origin():
+    """Reject cross-origin state-changing requests (CSRF defense-in-depth)."""
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        origin = request.headers.get("Origin")
+        if origin:
+            try:
+                origin_host = urlsplit(origin).netloc
+            except ValueError:
+                origin_host = None
+            if origin_host != request.host:
+                if request.path.startswith("/api/"):
+                    return jsonify({"error": "Origem inválida"}), 403
+                return "Origem inválida", 403
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
@@ -218,6 +235,18 @@ def api_simulate():
         if n_years not in ALLOWED_RUNS or n_trajectories not in ALLOWED_RUNS[n_years]:
             return jsonify({"error": "Combinação de horizonte e trajetórias não permitida neste servidor"}), 400
 
+        # Parse optional seed for reproducibility
+        raw_seed = params.get("seed")
+        if raw_seed in (None, ""):
+            seed = secrets.randbits(63)
+        else:
+            try:
+                seed = _parse_int(params, "seed")
+            except (TypeError, ValueError, OverflowError):
+                return jsonify({"error": "Seed inválido"}), 400
+            if seed < 0 or seed > 2**63 - 1:
+                return jsonify({"error": "Seed inválido"}), 400
+
         # Validate allocations
         clean_allocations = {}
         for key, val in allocations.items():
@@ -249,10 +278,12 @@ def api_simulate():
             n_years=n_years,
             n_trajectories=n_trajectories,
             withdrawal_annual=withdrawal_annual,
+            seed=seed,
             benchmark_returns=BENCHMARK_CDI["portfolio_returns"],
             benchmark_name="CDI",
         )
         results["warnings"] = portfolio["warnings"]
+        results["params"]["seed"] = seed
 
         return jsonify(results)
 
