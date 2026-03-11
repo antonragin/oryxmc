@@ -181,8 +181,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     Withdrawals are applied monthly (1/12 of annual amount per month),
     adjusted for cumulative inflation in that trajectory.
     """
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     n_months = n_years * 12
     n_hist = len(portfolio_returns)
@@ -190,7 +189,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     monthly_withdrawal_real = withdrawal_annual / 12.0
 
     # Bootstrap: sample month indices with replacement
-    sampled_idx = np.random.randint(0, n_hist, size=(n_trajectories, n_months))
+    sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
     sampled_returns = portfolio_returns[sampled_idx]
     sampled_ipca = ipca[sampled_idx]
 
@@ -223,11 +222,18 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
         # Compute per-path CAGR then take median
         valid = final > 0
-        cagrs = np.where(valid, np.power(final / initial_value, 1 / n_years) - 1, -1.0)
+        cagrs = np.full(final.shape, -1.0, dtype=float)
+        cagrs[valid] = np.power(final[valid] / initial_value, 1 / n_years) - 1
 
         # Histogram of final values (30 bins)
-        hist_counts, hist_edges = np.histogram(final, bins=30)
-        hist_mids = ((hist_edges[:-1] + hist_edges[1:]) / 2).tolist()
+        if np.all(final == final[0]):
+            hist_counts = np.array([len(final)])
+            hist_mids = [float(final[0])]
+        else:
+            hist_counts, hist_edges = np.histogram(
+                final, bins=30, range=(max(0, float(np.min(final))), float(np.max(final)))
+            )
+            hist_mids = ((hist_edges[:-1] + hist_edges[1:]) / 2).tolist()
 
         stats = {
             "percentiles": pct_lines,
