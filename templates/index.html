@@ -851,6 +851,7 @@
         }
 
         function setSelectIfValid(id, value) {
+            if (value == null) return;
             const sel = document.getElementById(id);
             if ([...sel.options].some(o => o.value === String(value))) {
                 sel.value = String(value);

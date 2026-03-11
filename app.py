@@ -72,7 +72,7 @@ def _parse_int(params, name, default=None):
 
 app = Flask(__name__)
 # Trust X-Forwarded-For and X-Forwarded-Proto from Render's reverse proxy
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 _secret = os.environ.get("SECRET_KEY")
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
 if IS_PROD and not _secret:
