@@ -298,30 +298,31 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     sampled_returns = portfolio_returns[sampled_idx]
     sampled_ipca = ipca[sampled_idx]
 
-    # Pre-compute growth factors (1 + r) using explicit output arrays to avoid
-    # any in-place mutation of sampled_returns / sampled_ipca.
-    ret_growth = np.empty_like(sampled_returns)
-    np.add(sampled_returns, 1.0, out=ret_growth)
-    ipca_growth = np.empty_like(sampled_ipca)
-    np.add(sampled_ipca, 1.0, out=ipca_growth)
+    # Use log1p / expm1 to avoid "1.0 + array" expressions entirely.
+    # On some numpy builds, (1.0 + array) can mutate the source array in-place.
+    log_ret = np.log1p(sampled_returns)
+    log_ipca = np.log1p(sampled_ipca)
 
-    sampled_real_returns = ret_growth / ipca_growth - 1.0
+    # Real returns: (1+r)/(1+i) - 1 = expm1(log1p(r) - log1p(i))
+    sampled_real_returns = np.expm1(log_ret - log_ipca)
 
-    # Vectorized cumulative inflation
+    # Cumulative inflation: cumprod(1+i) = exp(cumsum(log1p(i)))
     cum_inflation = np.empty((n_trajectories, n_months + 1), dtype=float)
     cum_inflation[:, 0] = 1.0
-    cum_inflation[:, 1:] = np.cumprod(ipca_growth, axis=1)
+    cum_inflation[:, 1:] = np.exp(np.cumsum(log_ipca, axis=1))
 
-    def simulate_nominal_paths(growth_factors):
-        """Build trajectory from pre-computed (1 + r) growth factors."""
+    def simulate_nominal_paths(log_rets):
+        """Build trajectory from log returns: exp(cumsum(log1p(r)))."""
         if not has_withdrawals:
             traj = np.empty((n_trajectories, n_months + 1), dtype=float)
             traj[:, 0] = initial_value
-            traj[:, 1:] = initial_value * np.cumprod(growth_factors, axis=1)
+            traj[:, 1:] = initial_value * np.exp(np.cumsum(log_rets, axis=1))
             return traj
+        # Withdrawal path needs per-step computation
+        growth = np.exp(log_rets)  # (1 + r) per month
         traj = np.full((n_trajectories, n_months + 1), initial_value, dtype=float)
         for t in range(n_months):
-            traj[:, t + 1] = traj[:, t] * growth_factors[:, t]
+            traj[:, t + 1] = traj[:, t] * growth[:, t]
             withdrawal = monthly_withdrawal_real * cum_inflation[:, t + 1]
             traj[:, t + 1] = np.maximum(traj[:, t + 1] - withdrawal, 0.0)
         return traj
@@ -331,12 +332,11 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         "sampled_returns_min": float(sampled_returns.min()),
         "sampled_returns_max": float(sampled_returns.max()),
         "sampled_returns_mean": float(sampled_returns.mean()),
-        "ret_growth_mean": float(ret_growth.mean()),
         "cum_inflation_max": float(cum_inflation.max()),
     }
 
     # Portfolio trajectories
-    traj_nominal = simulate_nominal_paths(ret_growth)
+    traj_nominal = simulate_nominal_paths(log_ret)
     traj_real = traj_nominal.copy()
     np.true_divide(traj_nominal, cum_inflation, out=traj_real)
 
@@ -347,10 +347,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     sampled_benchmark_real = None
     if benchmark_returns is not None:
         sampled_benchmark = benchmark_returns[sampled_idx]
-        bench_growth = np.empty_like(sampled_benchmark)
-        np.add(sampled_benchmark, 1.0, out=bench_growth)
-        sampled_benchmark_real = bench_growth / ipca_growth - 1.0
-        benchmark_nominal = simulate_nominal_paths(bench_growth)
+        log_bench = np.log1p(sampled_benchmark)
+        sampled_benchmark_real = np.expm1(log_bench - log_ipca)
+        benchmark_nominal = simulate_nominal_paths(log_bench)
         benchmark_real = benchmark_nominal.copy()
         np.true_divide(benchmark_nominal, cum_inflation, out=benchmark_real)
 
@@ -368,11 +367,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         cagrs[valid] = np.power(final[valid] / initial_value, 1 / n_years) - 1
 
         # Cash-flow-neutral NAV for drawdown/TWR (unaffected by withdrawals)
-        rets_growth = np.empty_like(sampled_rets)
-        np.add(sampled_rets, 1.0, out=rets_growth)
         nav_paths = np.empty((sampled_rets.shape[0], sampled_rets.shape[1] + 1), dtype=float)
         nav_paths[:, 0] = 1.0
-        nav_paths[:, 1:] = np.cumprod(rets_growth, axis=1)
+        nav_paths[:, 1:] = np.exp(np.cumsum(np.log1p(sampled_rets), axis=1))
 
         twr_cagrs = np.power(nav_paths[:, -1], 1.0 / n_years) - 1.0
         ann_vol = (np.std(sampled_rets, axis=1, ddof=1) * np.sqrt(12)
