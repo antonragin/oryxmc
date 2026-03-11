@@ -295,53 +295,48 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     # Bootstrap: sample month indices with replacement
     sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
 
-    # Sample returns FIRST, before any arithmetic that creates temporaries
-    sampled_returns = portfolio_returns[sampled_idx].copy()
-    sampled_ipca = ipca[sampled_idx].copy()
+    sampled_returns = portfolio_returns[sampled_idx]
+    sampled_ipca = ipca[sampled_idx]
 
-    # Debug: capture right after indexing, before any 1.0 + operations
-    _pr_min = float(portfolio_returns.min())
-    _pr_max = float(portfolio_returns.max())
-    _sr_min = float(sampled_returns.min())
-    _sr_max = float(sampled_returns.max())
+    # Pre-compute growth factors (1 + r) using explicit output arrays to avoid
+    # any in-place mutation of sampled_returns / sampled_ipca.
+    ret_growth = np.empty_like(sampled_returns)
+    np.add(sampled_returns, 1.0, out=ret_growth)
+    ipca_growth = np.empty_like(sampled_ipca)
+    np.add(sampled_ipca, 1.0, out=ipca_growth)
 
-    sampled_real_returns = (1.0 + sampled_returns) / (1.0 + sampled_ipca) - 1.0
+    sampled_real_returns = ret_growth / ipca_growth - 1.0
 
     # Vectorized cumulative inflation
     cum_inflation = np.empty((n_trajectories, n_months + 1), dtype=float)
     cum_inflation[:, 0] = 1.0
-    cum_inflation[:, 1:] = np.cumprod(1.0 + sampled_ipca, axis=1)
+    cum_inflation[:, 1:] = np.cumprod(ipca_growth, axis=1)
 
-    def simulate_nominal_paths(sampled_rets):
+    def simulate_nominal_paths(growth_factors):
+        """Build trajectory from pre-computed (1 + r) growth factors."""
         if not has_withdrawals:
-            # Fast vectorized path for accumulation mode
             traj = np.empty((n_trajectories, n_months + 1), dtype=float)
             traj[:, 0] = initial_value
-            traj[:, 1:] = initial_value * np.cumprod(1.0 + sampled_rets, axis=1)
+            traj[:, 1:] = initial_value * np.cumprod(growth_factors, axis=1)
             return traj
         traj = np.full((n_trajectories, n_months + 1), initial_value, dtype=float)
         for t in range(n_months):
-            traj[:, t + 1] = traj[:, t] * (1.0 + sampled_rets[:, t])
+            traj[:, t + 1] = traj[:, t] * growth_factors[:, t]
             withdrawal = monthly_withdrawal_real * cum_inflation[:, t + 1]
             traj[:, t + 1] = np.maximum(traj[:, t + 1] - withdrawal, 0.0)
         return traj
 
     # Debug diagnostics
     _diag = {
-        "sampled_idx_dtype": str(sampled_idx.dtype),
-        "sampled_idx_min": int(sampled_idx.min()),
-        "sampled_idx_max": int(sampled_idx.max()),
-        "portfolio_returns_min_inside": _pr_min,
-        "portfolio_returns_max_inside": _pr_max,
-        "sampled_returns_min": _sr_min,
-        "sampled_returns_max": _sr_max,
+        "sampled_returns_min": float(sampled_returns.min()),
+        "sampled_returns_max": float(sampled_returns.max()),
         "sampled_returns_mean": float(sampled_returns.mean()),
-        "sampled_returns_shape": list(sampled_returns.shape),
+        "ret_growth_mean": float(ret_growth.mean()),
         "cum_inflation_max": float(cum_inflation.max()),
     }
 
     # Portfolio trajectories
-    traj_nominal = simulate_nominal_paths(sampled_returns)
+    traj_nominal = simulate_nominal_paths(ret_growth)
     traj_real = traj_nominal.copy()
     np.true_divide(traj_nominal, cum_inflation, out=traj_real)
 
@@ -352,8 +347,10 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     sampled_benchmark_real = None
     if benchmark_returns is not None:
         sampled_benchmark = benchmark_returns[sampled_idx]
-        sampled_benchmark_real = (1.0 + sampled_benchmark) / (1.0 + sampled_ipca) - 1.0
-        benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
+        bench_growth = np.empty_like(sampled_benchmark)
+        np.add(sampled_benchmark, 1.0, out=bench_growth)
+        sampled_benchmark_real = bench_growth / ipca_growth - 1.0
+        benchmark_nominal = simulate_nominal_paths(bench_growth)
         benchmark_real = benchmark_nominal.copy()
         np.true_divide(benchmark_nominal, cum_inflation, out=benchmark_real)
 
@@ -371,9 +368,11 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         cagrs[valid] = np.power(final[valid] / initial_value, 1 / n_years) - 1
 
         # Cash-flow-neutral NAV for drawdown/TWR (unaffected by withdrawals)
+        rets_growth = np.empty_like(sampled_rets)
+        np.add(sampled_rets, 1.0, out=rets_growth)
         nav_paths = np.empty((sampled_rets.shape[0], sampled_rets.shape[1] + 1), dtype=float)
         nav_paths[:, 0] = 1.0
-        nav_paths[:, 1:] = np.cumprod(1.0 + sampled_rets, axis=1)
+        nav_paths[:, 1:] = np.cumprod(rets_growth, axis=1)
 
         twr_cagrs = np.power(nav_paths[:, -1], 1.0 / n_years) - 1.0
         ann_vol = (np.std(sampled_rets, axis=1, ddof=1) * np.sqrt(12)
