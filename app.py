@@ -74,7 +74,10 @@ def api_simulate():
             return jsonify({"error": "allocations inválido"}), 400
 
         try:
-            initial_value = float(params.get("initial_value", 1000000))
+            iv_raw = params.get("initial_value", 1000000)
+            if isinstance(iv_raw, bool):
+                return jsonify({"error": "Valor inicial inválido"}), 400
+            initial_value = float(iv_raw)
             n_years_raw = params.get("n_years", 10)
             if not isinstance(n_years_raw, int) or isinstance(n_years_raw, bool):
                 n_years_f = float(n_years_raw)
@@ -82,7 +85,10 @@ def api_simulate():
                     return jsonify({"error": "Horizonte deve ser um número inteiro"}), 400
                 n_years_raw = int(n_years_f)
             n_years = n_years_raw
-            withdrawal_annual = float(params.get("withdrawal_annual", 0))
+            wa_raw = params.get("withdrawal_annual", 0)
+            if isinstance(wa_raw, bool):
+                return jsonify({"error": "Retirada anual inválida"}), 400
+            withdrawal_annual = float(wa_raw)
             n_traj_raw = params.get("n_trajectories", 10000)
             if not isinstance(n_traj_raw, int) or isinstance(n_traj_raw, bool):
                 n_traj_f = float(n_traj_raw)
@@ -122,7 +128,7 @@ def api_simulate():
 
         allocations = clean_allocations
         total = sum(allocations.values())
-        if not math.isfinite(total) or abs(total - 1.0) > 0.011:
+        if not math.isfinite(total) or abs(total - 1.0) > 0.006:
             return jsonify({"error": f"Alocações devem somar 100% (atual: {total*100:.1f}%)"}), 400
 
         # Build portfolio returns with substitution
@@ -149,4 +155,5 @@ def api_simulate():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true")
+    app.run(host="0.0.0.0", port=port, debug=debug)

@@ -718,8 +718,8 @@
             }
 
             items.push(
-                { label: 'Percentil 5', value: fmtBRL(stats.final_p5), cls: '' },
-                { label: 'Percentil 95', value: fmtBRL(stats.final_p95), cls: 'positive' },
+                { label: 'Percentil 5', value: fmtBRL(stats.final_p5), cls: stats.final_p5 >= params.initial_value ? 'positive' : 'negative' },
+                { label: 'Percentil 95', value: fmtBRL(stats.final_p95), cls: stats.final_p95 >= params.initial_value ? 'positive' : 'negative' },
                 { label: 'Média Final', value: fmtBRL(stats.final_mean), cls: '' },
             );
             grid.innerHTML = items.map(i => `
