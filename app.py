@@ -1,12 +1,18 @@
 """OryxMC - Monte Carlo Portfolio Simulator for Brazilian Investors."""
 import os
 import math
+import hmac
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from functools import wraps
 import engine
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MB max request
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+if os.environ.get("SECRET_KEY"):
+    app.config["SESSION_COOKIE_SECURE"] = True
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "oryx2026")
 
 # Load data once at startup
@@ -29,14 +35,15 @@ def login_required(f):
 def login():
     error = None
     if request.method == "POST":
-        if request.form.get("password") == APP_PASSWORD:
+        pwd = request.form.get("password", "")
+        if hmac.compare_digest(pwd, APP_PASSWORD):
             session["authenticated"] = True
             return redirect(url_for("index"))
         error = "Senha incorreta"
     return render_template("login.html", error=error)
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
     return redirect(url_for("login"))
@@ -124,8 +131,8 @@ def api_simulate():
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Erro interno do servidor"}), 500
 
 
 if __name__ == "__main__":
