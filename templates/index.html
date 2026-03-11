@@ -485,6 +485,7 @@
 
         async function init() {
             const res = await fetch('/api/indices');
+            if (res.status === 401) { window.location = '/login'; return; }
             INDICES = await res.json();
             renderAllocationForm();
         }
@@ -558,6 +559,17 @@
                 return;
             }
 
+            const initialValue = parseFloat(document.getElementById('initialValue').value);
+            const nYears = parseInt(document.getElementById('nYears').value, 10);
+            const withdrawalAnnual = parseFloat(document.getElementById('withdrawal').value) || 0;
+            const nTraj = parseInt(document.getElementById('nTraj').value, 10);
+
+            if (!Number.isFinite(initialValue) || initialValue <= 0) {
+                errEl.textContent = 'Valor inicial inválido.';
+                errEl.style.display = 'block';
+                return;
+            }
+
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span>Simulando...';
 
@@ -567,12 +579,13 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         allocations,
-                        initial_value: parseFloat(document.getElementById('initialValue').value),
-                        n_years: parseInt(document.getElementById('nYears').value),
-                        withdrawal_annual: parseFloat(document.getElementById('withdrawal').value),
-                        n_trajectories: parseInt(document.getElementById('nTraj').value),
+                        initial_value: initialValue,
+                        n_years: nYears,
+                        withdrawal_annual: withdrawalAnnual,
+                        n_trajectories: nTraj,
                     }),
                 });
+                if (res.status === 401) { window.location = '/login'; return; }
                 const data = await res.json();
                 if (data.error) {
                     errEl.textContent = data.error;

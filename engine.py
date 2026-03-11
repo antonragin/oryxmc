@@ -75,10 +75,15 @@ def build_portfolio_returns(data, allocations):
         cat = data["indices"][idx_key]["category"]
         cat_allocs.setdefault(cat, {})[idx_key] = weight
 
-    warnings = []
-    substitution_cats = set()
     portfolio_returns = []
     months_used = []
+
+    # Track actual substitutions per missing index
+    sub_log = {}
+    for cat, idx_weights in cat_allocs.items():
+        for idx_key in idx_weights:
+            sub_log[idx_key] = {"peer_months": 0, "fallback_months": 0,
+                                "peers": set(), "fallback": None}
 
     for month in all_months:
         month_return = 0.0
@@ -95,17 +100,22 @@ def build_portfolio_returns(data, allocations):
             missing_weight = sum(missing.values())
 
             if missing_weight > 0:
-                substitution_cats.add(cat)
                 if available:
                     # Redistribute pro-rata among available selected indices
                     total_avail = sum(available.values())
                     for k in list(available):
                         available[k] += missing_weight * (available[k] / total_avail)
+                    for mk in missing:
+                        sub_log[mk]["peer_months"] += 1
+                        sub_log[mk]["peers"].update(available.keys())
                 else:
                     # Use category fallback
                     fallback = CATEGORY_FALLBACKS.get(cat)
                     if fallback and month in data["indices"][fallback]["returns"]:
                         available = {fallback: sum(idx_weights.values())}
+                        for mk in missing:
+                            sub_log[mk]["fallback_months"] += 1
+                            sub_log[mk]["fallback"] = fallback
                     else:
                         raise ValueError(
                             f"Sem substituto disponível para {CATEGORIES.get(cat, cat)} em {month}."
@@ -117,30 +127,31 @@ def build_portfolio_returns(data, allocations):
         portfolio_returns.append(month_return)
         months_used.append(month)
 
-    # Generate warnings for indices with incomplete history
-    for cat, idx_weights in cat_allocs.items():
-        for idx_key, weight in idx_weights.items():
-            idx_info = data["indices"][idx_key]
-            if idx_info["months_available"] < len(all_months):
-                missing_count = len(all_months) - idx_info["months_available"]
-                # Find what was used as substitute
-                cat_peers = [k for k in idx_weights if k != idx_key
-                             and data["indices"][k]["months_available"] >= len(all_months)]
-                if cat_peers:
-                    peer_names = ", ".join(data["indices"][k]["name"] for k in cat_peers)
-                    warnings.append(
-                        f"{idx_info['name']} ({weight*100:.0f}%) — disponível desde "
-                        f"{idx_info['start_date']}. Nos {missing_count} meses anteriores, "
-                        f"a alocação foi redistribuída para: {peer_names}."
-                    )
-                else:
-                    fallback = CATEGORY_FALLBACKS.get(cat)
-                    fb_name = data["indices"][fallback]["name"] if fallback else "N/A"
-                    warnings.append(
-                        f"{idx_info['name']} ({weight*100:.0f}%) — disponível desde "
-                        f"{idx_info['start_date']}. Nos {missing_count} meses anteriores, "
-                        f"utilizou-se {fb_name} como proxy da categoria."
-                    )
+    # Generate warnings from actual substitution log
+    warnings = []
+    for idx_key, log in sub_log.items():
+        total_missing = log["peer_months"] + log["fallback_months"]
+        if total_missing == 0:
+            continue
+        idx_info = data["indices"][idx_key]
+        cat = idx_info["category"]
+        weight = allocations[idx_key]
+        parts = []
+        if log["peer_months"] > 0:
+            peer_names = ", ".join(data["indices"][k]["name"] for k in sorted(log["peers"]))
+            parts.append(
+                f"em {log['peer_months']} meses redistribuída para: {peer_names}"
+            )
+        if log["fallback_months"] > 0:
+            fb_name = data["indices"][log["fallback"]]["name"]
+            parts.append(
+                f"em {log['fallback_months']} meses utilizou-se {fb_name} como proxy"
+            )
+        warnings.append(
+            f"{idx_info['name']} ({weight*100:.0f}%) — disponível desde "
+            f"{idx_info['start_date']}. Nos {total_missing} meses anteriores: "
+            + "; ".join(parts) + "."
+        )
 
     # Align IPCA — raise error if missing
     ipca_values = []
