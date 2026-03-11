@@ -228,9 +228,8 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
     def compute_stats(trajectories):
         final = trajectories[:, -1]
-        pct_lines = {}
-        for p in percentiles:
-            pct_lines[p] = np.percentile(trajectories, p, axis=0).tolist()
+        pct_values = np.percentile(trajectories, percentiles, axis=0)
+        pct_lines = {p: pct_values[i].tolist() for i, p in enumerate(percentiles)}
 
         # Compute per-path CAGR then take median
         valid = final > 0
@@ -264,14 +263,31 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             "histogram": {"counts": hist_counts.tolist(), "mids": hist_mids},
         }
 
+        # Drawdown metrics
+        peaks = np.maximum.accumulate(trajectories, axis=1)
+        safe_peaks = np.where(peaks == 0, 1, peaks)
+        drawdowns = trajectories / safe_peaks - 1
+        max_dd = drawdowns.min(axis=1)
+        stats["median_max_drawdown"] = float(np.median(max_dd))
+        stats["p10_max_drawdown"] = float(np.percentile(max_dd, 10))
+
         if has_withdrawals:
             stats["prob_ruin"] = float(np.mean(final <= 0) * 100)
             stats["median_cagr"] = None
             stats["prob_loss"] = None
+            # Survival analysis: find first ruin month per trajectory
+            ruined = final <= 0
+            if np.any(ruined):
+                ruin_mask = trajectories[ruined] <= 0
+                first_ruin = np.argmax(ruin_mask, axis=1)
+                stats["median_ruin_year"] = float(np.median(first_ruin) / 12)
+            else:
+                stats["median_ruin_year"] = None
         else:
             stats["prob_loss"] = float(np.mean(final < initial_value) * 100)
             stats["prob_ruin"] = None
             stats["median_cagr"] = float(np.median(cagrs))
+            stats["median_ruin_year"] = None
 
         return stats
 

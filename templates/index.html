@@ -321,6 +321,21 @@
             border-color: var(--accent);
             color: var(--accent);
         }
+        .preset-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Mobile */
+        @media (max-width: 640px) {
+            header, .container { padding: 12px 14px; }
+            .card { padding: 16px; }
+            .header-right { flex-direction: column; align-items: flex-end; gap: 4px; }
+            .param-grid { grid-template-columns: 1fr; }
+            #chart { height: 320px !important; }
+            #histChart { height: 240px !important; }
+            #methodologyContent { columns: 1 !important; }
+            .btn-run { position: sticky; bottom: 12px; z-index: 5; }
+            .stats-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+            .stat-value { font-size: 17px; }
+        }
     </style>
 </head>
 <body>
@@ -462,6 +477,7 @@
 
     <script>
         let INDICES = [];
+        let METADATA = {};
         let RESULTS = null;
         let CURRENT_VIEW = 'nominal';
         let RUNNING = false;
@@ -489,11 +505,29 @@
                 const res = await fetch('/api/indices');
                 if (res.status === 401) { window.location = '/login'; return; }
                 if (!res.ok) throw new Error('Falha ao carregar índices');
-                INDICES = await res.json();
+                const data = await res.json();
+                INDICES = data.indices;
+                METADATA = data.metadata || {};
                 renderAllocationForm();
+                updateMethodology();
             } catch (e) {
                 document.getElementById('allocationForm').textContent =
                     'Erro ao carregar dados: ' + e.message;
+            }
+        }
+
+        function updateMethodology() {
+            if (!METADATA.target_start) return;
+            const start = METADATA.target_start;
+            const end = METADATA.target_end;
+            const nMonths = METADATA.n_months || 240;
+            const years = Math.round(nMonths / 12);
+            const el = document.getElementById('methodologyContent');
+            if (el) {
+                const startFmt = start.slice(5, 7) + '/' + start.slice(0, 4);
+                const endFmt = end.slice(5, 7) + '/' + end.slice(0, 4);
+                el.querySelector('p:first-child').innerHTML =
+                    `<strong>Simulação:</strong> Bootstrap Monte Carlo com reamostragem com reposição dos retornos mensais históricos (${years} anos, ${startFmt} a ${endFmt}). Cada trajetória é independente e equiprovável.`;
             }
         }
 
@@ -541,8 +575,10 @@
                 el.textContent = '100%';
             } else if (valid) {
                 el.textContent = total.toFixed(1) + '% ≈ 100%';
-            } else {
+            } else if (remaining > 0) {
                 el.textContent = total.toFixed(0) + '% (faltam ' + remaining.toFixed(0) + '%)';
+            } else {
+                el.textContent = total.toFixed(0) + '% (excede ' + Math.abs(remaining).toFixed(0) + '%)';
             }
             el.className = 'total-value ' + (valid ? 'ok' : 'err');
             document.getElementById('runBtn').disabled = RUNNING || !valid;
@@ -703,25 +739,35 @@
 
         function renderStats(stats, params) {
             const grid = document.getElementById('statsGrid');
-            const items = [
-                { label: 'Mediana Final', value: fmtBRL(stats.final_median), cls: stats.final_median >= params.initial_value ? 'positive' : 'negative' },
-            ];
+            const items = [];
+            const isWithdrawal = stats.has_withdrawals;
 
-            if (stats.has_withdrawals) {
-                // Withdrawal mode: show ruin probability instead of CAGR/loss
-                items.push({ label: 'P(Ruína)', value: (stats.prob_ruin || 0).toFixed(1) + '%', cls: (stats.prob_ruin || 0) > 10 ? 'negative' : '' });
+            if (isWithdrawal) {
+                // Withdrawal mode: benchmark against zero (survival), not initial capital
+                items.push({ label: 'Mediana Final', value: fmtBRL(stats.final_median), cls: stats.final_median > 0 ? 'positive' : 'negative' });
+                items.push({ label: 'P(Ruína)', value: (stats.prob_ruin || 0).toFixed(1) + '%', cls: (stats.prob_ruin || 0) > 10 ? 'negative' : 'positive' });
+                if (stats.median_ruin_year != null) {
+                    items.push({ label: 'Ruína Mediana', value: stats.median_ruin_year.toFixed(1) + ' anos', cls: 'negative' });
+                }
             } else {
-                // Accumulation mode: show CAGR and loss probability
+                // Accumulation mode
+                items.push({ label: 'Mediana Final', value: fmtBRL(stats.final_median), cls: stats.final_median >= params.initial_value ? 'positive' : 'negative' });
                 const cagr = stats.median_cagr || 0;
                 items.push({ label: 'CAGR Mediano', value: (cagr * 100).toFixed(1) + '% a.a.', cls: cagr >= 0 ? 'positive' : 'negative' });
                 items.push({ label: 'P(Perda)', value: (stats.prob_loss || 0).toFixed(1) + '%', cls: (stats.prob_loss || 0) > 30 ? 'negative' : '' });
             }
 
+            const ref = isWithdrawal ? 0 : params.initial_value;
             items.push(
-                { label: 'Percentil 5', value: fmtBRL(stats.final_p5), cls: stats.final_p5 >= params.initial_value ? 'positive' : 'negative' },
-                { label: 'Percentil 95', value: fmtBRL(stats.final_p95), cls: stats.final_p95 >= params.initial_value ? 'positive' : 'negative' },
-                { label: 'Média Final', value: fmtBRL(stats.final_mean), cls: '' },
+                { label: 'Percentil 5', value: fmtBRL(stats.final_p5), cls: stats.final_p5 >= ref ? 'positive' : 'negative' },
+                { label: 'Percentil 95', value: fmtBRL(stats.final_p95), cls: stats.final_p95 >= ref ? 'positive' : 'negative' },
             );
+
+            // Drawdown metrics
+            if (stats.median_max_drawdown != null) {
+                items.push({ label: 'Drawdown Mediano', value: (stats.median_max_drawdown * 100).toFixed(1) + '%', cls: 'negative' });
+            }
+
             grid.innerHTML = items.map(i => `
                 <div class="stat-card">
                     <div class="stat-label">${i.label}</div>
@@ -835,9 +881,10 @@
             const mids = hist.mids;
             const counts = hist.counts;
 
-            // Color bars based on whether they're above or below initial value
+            // Color bars: in withdrawal mode, benchmark against 0; in accumulation, against initial
+            const ref = stats.has_withdrawals ? 0 : params.initial_value;
             const barColors = mids.map(m =>
-                m >= params.initial_value ? 'rgba(52, 211, 153, 0.7)' : 'rgba(248, 113, 113, 0.7)'
+                m >= ref ? 'rgba(52, 211, 153, 0.7)' : 'rgba(248, 113, 113, 0.7)'
             );
 
             // Compute bin width for proper bar display
@@ -853,29 +900,36 @@
             };
 
             // Vertical line for median
+            const maxCount = Math.max(...counts);
             const shapes = [{
                 type: 'line', x0: stats.final_median, x1: stats.final_median,
-                y0: 0, y1: Math.max(...counts) * 1.05,
+                y0: 0, y1: maxCount * 1.05,
                 line: { color: '#22d3ee', dash: 'dash', width: 2 },
-            }, {
-                type: 'line', x0: params.initial_value, x1: params.initial_value,
-                y0: 0, y1: Math.max(...counts) * 1.05,
-                line: { color: 'rgba(148,163,184,0.5)', dash: 'dot', width: 1 },
             }];
-
             const annotations = [{
-                x: stats.final_median, y: Math.max(...counts) * 1.05,
+                x: stats.final_median, y: maxCount * 1.05,
                 text: 'Mediana: ' + fmtBRL(stats.final_median),
                 showarrow: false, font: { size: 11, color: '#22d3ee' }, yshift: 10,
-            }, {
-                x: params.initial_value, y: Math.max(...counts) * 0.95,
-                text: 'Valor Inicial', showarrow: false,
-                font: { size: 10, color: '#94a3b8' }, yshift: 10,
             }];
 
-            // Ensure x-axis range includes initial value and median
-            const xMin = Math.min(mids[0] - binWidth, params.initial_value, stats.final_median);
-            const xMax = Math.max(mids[mids.length - 1] + binWidth, params.initial_value, stats.final_median);
+            // In accumulation mode, add initial value reference line
+            if (!stats.has_withdrawals) {
+                shapes.push({
+                    type: 'line', x0: params.initial_value, x1: params.initial_value,
+                    y0: 0, y1: maxCount * 1.05,
+                    line: { color: 'rgba(148,163,184,0.5)', dash: 'dot', width: 1 },
+                });
+                annotations.push({
+                    x: params.initial_value, y: maxCount * 0.95,
+                    text: 'Valor Inicial', showarrow: false,
+                    font: { size: 10, color: '#94a3b8' }, yshift: 10,
+                });
+            }
+
+            // Ensure x-axis range includes reference points, clamped to >= 0
+            const refVal = stats.has_withdrawals ? 0 : params.initial_value;
+            const xMin = Math.max(0, Math.min(mids[0] - binWidth, refVal, stats.final_median));
+            const xMax = Math.max(mids[mids.length - 1] + binWidth, refVal, stats.final_median);
 
             Plotly.newPlot('histChart', [trace], {
                 title: {

@@ -7,11 +7,14 @@ from functools import wraps
 import engine
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
+_secret = os.environ.get("SECRET_KEY")
+if not _secret and os.environ.get("RENDER"):
+    raise RuntimeError("SECRET_KEY must be set in production")
+app.secret_key = _secret or "dev-only-insecure-key"
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MB max request
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-if os.environ.get("SECRET_KEY"):
+if _secret:
     app.config["SESSION_COOKIE_SECURE"] = True
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "oryx2026")
 
@@ -58,7 +61,15 @@ def index():
 @app.route("/api/indices")
 @login_required
 def api_indices():
-    return jsonify(INDICES)
+    return jsonify({
+        "indices": INDICES,
+        "metadata": {
+            "target_start": DATA["metadata"]["target_start"],
+            "target_end": DATA["metadata"]["target_end"],
+            "n_months": len([m for m in DATA["ipca"]
+                            if DATA["metadata"]["target_start"] <= m <= DATA["metadata"]["target_end"]]),
+        },
+    })
 
 
 @app.route("/api/simulate", methods=["POST"])
@@ -109,9 +120,12 @@ def api_simulate():
         if n_trajectories <= 0 or n_trajectories > 20000:
             return jsonify({"error": "Número de trajetórias deve ser entre 1 e 20.000"}), 400
 
-        # Reject oversized requests (OOM protection)
-        if n_trajectories * n_years * 12 > 4_000_000:
-            return jsonify({"error": "Combinação de horizonte e trajetórias muito grande"}), 400
+        # Reject oversized requests (OOM protection for 512MB / 2-worker deploy)
+        # Engine allocates ~6 full arrays of size (n_traj, n_months): ~48 bytes/cell
+        n_months_est = n_years * 12
+        estimated_bytes = n_trajectories * n_months_est * 48 + n_trajectories * (n_months_est + 1) * 24
+        if estimated_bytes > 120_000_000:
+            return jsonify({"error": "Simulação muito grande para o servidor atual"}), 400
 
         # Validate allocations
         clean_allocations = {}
@@ -150,6 +164,7 @@ def api_simulate():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception:
+        app.logger.exception("api_simulate failed")
         return jsonify({"error": "Erro interno do servidor"}), 500
 
 
