@@ -56,22 +56,37 @@ def api_indices():
 def api_simulate():
     try:
         params = request.get_json()
+        if not params:
+            return jsonify({"error": "JSON inválido"}), 400
+
         allocations = params.get("allocations", {})
         initial_value = float(params.get("initial_value", 1000000))
         n_years = int(params.get("n_years", 10))
         withdrawal_annual = float(params.get("withdrawal_annual", 0))
         n_trajectories = min(int(params.get("n_trajectories", 10000)), 20000)
 
+        # Validate parameters
+        if initial_value <= 0 or initial_value > 1e12:
+            return jsonify({"error": "Valor inicial inválido"}), 400
+        if n_years <= 0 or n_years > 50:
+            return jsonify({"error": "Horizonte deve ser entre 1 e 50 anos"}), 400
+        if withdrawal_annual < 0:
+            return jsonify({"error": "Retirada anual não pode ser negativa"}), 400
+        if n_trajectories <= 0:
+            return jsonify({"error": "Número de trajetórias inválido"}), 400
+
         # Validate allocations
+        for key, val in allocations.items():
+            if key not in DATA["indices"]:
+                return jsonify({"error": f"Índice desconhecido: {key}"}), 400
+            if val < 0:
+                return jsonify({"error": f"Alocação negativa não permitida: {key}"}), 400
+
         total = sum(allocations.values())
         if abs(total - 1.0) > 0.01:
             return jsonify({"error": f"Alocações devem somar 100% (atual: {total*100:.1f}%)"}), 400
 
-        for key in allocations:
-            if key not in DATA["indices"]:
-                return jsonify({"error": f"Índice desconhecido: {key}"}), 400
-
-        # Build portfolio returns
+        # Build portfolio returns with substitution
         portfolio = engine.build_portfolio_returns(DATA, allocations)
 
         # Run simulation
@@ -87,6 +102,8 @@ def api_simulate():
 
         return jsonify(results)
 
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

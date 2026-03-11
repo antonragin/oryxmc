@@ -440,6 +440,22 @@
                 </div>
             </div>
         </div>
+
+        <!-- Methodology Footer -->
+        <div class="card" style="margin-top: 24px;">
+            <div class="card-title">
+                <span class="icon">&#9432;</span>
+                Metodologia
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.7; columns: 2; column-gap: 32px;">
+                <p style="margin-bottom: 8px;"><strong>Simulação:</strong> Bootstrap Monte Carlo com reamostragem com reposição dos retornos mensais históricos (20 anos, mar/2006 a fev/2026). Cada trajetória é independente e equiprovável.</p>
+                <p style="margin-bottom: 8px;"><strong>Retornos Reais:</strong> Ajustados pelo IPCA mensal (série 433 do BCB). Amostragem pareada garante consistência entre trajetórias nominais e reais.</p>
+                <p style="margin-bottom: 8px;"><strong>Conversão Cambial:</strong> Retornos de ativos internacionais convertidos para BRL usando variação mensal do câmbio USD/BRL.</p>
+                <p style="margin-bottom: 8px;"><strong>Retiradas:</strong> Aplicadas no início de cada ano, corrigidas pela inflação acumulada da trajetória.</p>
+                <p style="margin-bottom: 8px;"><strong>Impostos sobre Dividendos:</strong> S&P 500 assume 0% WHT (via ETF sintético). Demais ativos internacionais consideram 15% WHT sobre dividendos.</p>
+                <p style="margin-bottom: 8px;"><strong>Substituição:</strong> Índices sem histórico completo de 20 anos têm alocação redistribuída proporcionalmente entre índices disponíveis da mesma categoria nos meses faltantes.</p>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -598,15 +614,25 @@
 
         function renderStats(stats, params) {
             const grid = document.getElementById('statsGrid');
-            const cagr = stats.median_cagr;
             const items = [
                 { label: 'Mediana Final', value: fmtBRL(stats.final_median), cls: stats.final_median >= params.initial_value ? 'positive' : 'negative' },
-                { label: 'CAGR Mediano', value: (cagr * 100).toFixed(1) + '% a.a.', cls: cagr >= 0 ? 'positive' : 'negative' },
-                { label: 'P(Perda)', value: stats.prob_loss.toFixed(1) + '%', cls: stats.prob_loss > 30 ? 'negative' : '' },
+            ];
+
+            if (stats.has_withdrawals) {
+                // Withdrawal mode: show ruin probability instead of CAGR/loss
+                items.push({ label: 'P(Ruína)', value: (stats.prob_ruin || 0).toFixed(1) + '%', cls: (stats.prob_ruin || 0) > 10 ? 'negative' : '' });
+            } else {
+                // Accumulation mode: show CAGR and loss probability
+                const cagr = stats.median_cagr || 0;
+                items.push({ label: 'CAGR Mediano', value: (cagr * 100).toFixed(1) + '% a.a.', cls: cagr >= 0 ? 'positive' : 'negative' });
+                items.push({ label: 'P(Perda)', value: (stats.prob_loss || 0).toFixed(1) + '%', cls: (stats.prob_loss || 0) > 30 ? 'negative' : '' });
+            }
+
+            items.push(
                 { label: 'Percentil 5', value: fmtBRL(stats.final_p5), cls: '' },
                 { label: 'Percentil 95', value: fmtBRL(stats.final_p95), cls: 'positive' },
                 { label: 'Média Final', value: fmtBRL(stats.final_mean), cls: '' },
-            ];
+            );
             grid.innerHTML = items.map(i => `
                 <div class="stat-card">
                     <div class="stat-label">${i.label}</div>
