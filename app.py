@@ -23,8 +23,7 @@ APP_PASSWORD = APP_PASSWORD or "oryx2026"
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MB max request
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-if _secret:
-    app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_SECURE"] = IS_PROD
 
 # Load data once at startup
 DATA = engine.load_data()
@@ -44,6 +43,28 @@ def login_required(f):
     return decorated
 
 
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate, private")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.plot.ly; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    )
+    return response
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
@@ -56,7 +77,7 @@ def login():
     return render_template("login.html", error=error)
 
 
-@app.route("/logout", methods=["GET", "POST"])
+@app.route("/logout", methods=["POST"])
 def logout():
     session.clear()
     return redirect(url_for("login"))

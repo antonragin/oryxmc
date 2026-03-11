@@ -9,8 +9,6 @@ from pathlib import Path
 
 DATA_FILE = Path(__file__).parent / "data" / "historical_returns.json"
 
-TARGET_MONTHS = 240
-
 CATEGORIES = {
     "br_fixed_income": "Renda Fixa Brasil",
     "br_equities": "Ações Brasil",
@@ -232,7 +230,6 @@ def build_portfolio_returns(data, allocations):
         if total_missing == 0:
             continue
         idx_info = data["indices"][idx_key]
-        cat = idx_info["category"]
         weight = allocations[idx_key]
         parts = []
         if log["peer_months"] > 0:
@@ -280,6 +277,8 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
     portfolio_returns = np.asarray(portfolio_returns, dtype=float)
     ipca = np.asarray(ipca, dtype=float)
+    if len(portfolio_returns) != len(ipca):
+        raise ValueError("Séries históricas desalinhadas")
 
     rng = np.random.default_rng(seed)
 
@@ -290,26 +289,34 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
     if benchmark_returns is not None:
         benchmark_returns = np.asarray(benchmark_returns, dtype=float)
+        if len(benchmark_returns) != n_hist:
+            raise ValueError("Benchmark desalinhado com o histórico")
 
-    # Bootstrap: sample month indices with replacement
-    sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
-    sampled_returns = portfolio_returns[sampled_idx]
+    # Bootstrap: sample month indices with replacement (uint16 saves memory)
+    idx_dtype = np.uint16 if n_hist <= np.iinfo(np.uint16).max else np.uint32
+    sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months), dtype=idx_dtype)
     sampled_ipca = ipca[sampled_idx]
-    sampled_benchmark = benchmark_returns[sampled_idx] if benchmark_returns is not None else None
 
-    # Compute cumulative inflation once (shared by portfolio and benchmark)
-    cum_inflation = np.ones((n_trajectories, n_months + 1), dtype=float)
-    for t in range(n_months):
-        cum_inflation[:, t + 1] = cum_inflation[:, t] * (1 + sampled_ipca[:, t])
+    # Vectorized cumulative inflation
+    cum_inflation = np.empty((n_trajectories, n_months + 1), dtype=float)
+    cum_inflation[:, 0] = 1.0
+    cum_inflation[:, 1:] = np.cumprod(1.0 + sampled_ipca, axis=1)
 
     def simulate_nominal_paths(sampled_rets):
+        if not has_withdrawals:
+            # Fast vectorized path for accumulation mode
+            traj = np.empty((n_trajectories, n_months + 1), dtype=float)
+            traj[:, 0] = initial_value
+            traj[:, 1:] = initial_value * np.cumprod(1.0 + sampled_rets, axis=1)
+            return traj
         traj = np.full((n_trajectories, n_months + 1), initial_value, dtype=float)
         for t in range(n_months):
-            traj[:, t + 1] = traj[:, t] * (1 + sampled_rets[:, t])
-            if has_withdrawals:
-                withdrawal = monthly_withdrawal_real * cum_inflation[:, t + 1]
-                traj[:, t + 1] = np.maximum(traj[:, t + 1] - withdrawal, 0.0)
+            traj[:, t + 1] = traj[:, t] * (1.0 + sampled_rets[:, t])
+            withdrawal = monthly_withdrawal_real * cum_inflation[:, t + 1]
+            traj[:, t + 1] = np.maximum(traj[:, t + 1] - withdrawal, 0.0)
         return traj
+
+    sampled_returns = portfolio_returns[sampled_idx]
 
     # Portfolio trajectories
     traj_nominal = simulate_nominal_paths(sampled_returns)
@@ -319,7 +326,8 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     # Benchmark trajectories (same sampled months)
     benchmark_nominal = None
     benchmark_real = None
-    if sampled_benchmark is not None:
+    if benchmark_returns is not None:
+        sampled_benchmark = benchmark_returns[sampled_idx]
         benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
         benchmark_real = benchmark_nominal.copy()
         np.true_divide(benchmark_nominal, cum_inflation, out=benchmark_real)

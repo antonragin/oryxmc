@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-locale-pt-br-latest.js"></script>
     <style>
         :root {
             --bg-primary: #0f172a;
@@ -42,13 +43,20 @@
         .logo { font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
         .logo span { color: var(--text-secondary); font-weight: 300; }
         .header-right { display: flex; align-items: center; gap: 16px; }
-        .header-right a {
+        .header-right a,
+        .header-link-btn {
             color: var(--text-secondary);
             text-decoration: none;
             font-size: 13px;
             transition: color 0.2s;
+            background: transparent;
+            border: 0;
+            padding: 0;
+            font: inherit;
+            cursor: pointer;
         }
-        .header-right a:hover { color: var(--text-primary); }
+        .header-right a:hover,
+        .header-link-btn:hover { color: var(--text-primary); }
 
         /* Layout */
         .container {
@@ -175,6 +183,12 @@
             border-color: var(--accent);
         }
         .param-group select option { background: var(--bg-secondary); }
+        .input-help {
+            margin-top: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
 
         /* Run button */
         .btn-run {
@@ -285,6 +299,17 @@
         }
         .chart-scale-toggle:hover { border-color: var(--accent); color: var(--accent); }
         .chart-scale-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
+        .header-link-btn:focus-visible,
+        .preset-btn:focus-visible,
+        .chart-tab:focus-visible,
+        .chart-scale-toggle:focus-visible,
+        .btn-run:focus-visible,
+        .alloc-input:focus-visible,
+        .param-group input:focus-visible,
+        .param-group select:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
 
         /* Warnings */
         .warnings {
@@ -362,7 +387,7 @@
         <div class="logo">Oryx<span>MC</span></div>
         <div class="header-right">
             <span style="color: var(--text-muted); font-size: 12px;">Simulador Monte Carlo de Portfólio</span>
-            <a href="/logout">Sair</a>
+            <form action="/logout" method="post" style="margin: 0;"><button type="submit" class="header-link-btn">Sair</button></form>
         </div>
     </header>
 
@@ -421,7 +446,7 @@
                             <label>Modo de Retirada</label>
                             <select id="withdrawalMode" onchange="updateWithdrawalUI()">
                                 <option value="fixed" selected>Valor fixo real (R$)</option>
-                                <option value="percent">% do patrimônio (SWR)</option>
+                                <option value="percent">% do valor inicial (SWR)</option>
                             </select>
                         </div>
                         <div class="param-group" id="withdrawalFixedGroup">
@@ -441,17 +466,18 @@
                             </select>
                         </div>
                     </div>
+                    <div id="withdrawalHint" class="input-help" aria-live="polite"></div>
                     <button class="btn-run" id="runBtn" onclick="runSimulation()" disabled>
                         Executar Simulação
                     </button>
-                    <div id="errorMsg" style="display:none; margin-top: 10px; padding: 10px 14px; background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); border-radius: 6px; color: #f87171; font-size: 13px;"></div>
+                    <div id="errorMsg" role="alert" aria-live="assertive" style="display:none; margin-top: 10px; padding: 10px 14px; background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); border-radius: 6px; color: #f87171; font-size: 13px;"></div>
                 </div>
             </div>
 
             <!-- RIGHT PANEL: Results -->
             <div class="results-area" id="resultsArea">
                 <div class="card">
-                    <div class="results-placeholder" id="placeholder">
+                    <div class="results-placeholder" id="placeholder" role="status" aria-live="polite">
                         Configure a alocação do portfólio no painel esquerdo<br>
                         e clique em "Executar Simulação"
                     </div>
@@ -471,9 +497,9 @@
 
                         <!-- Chart Tabs -->
                         <div class="chart-toolbar">
-                            <div class="chart-tabs">
-                                <button class="chart-tab active" onclick="switchView('nominal')" id="tabNominal">Nominal</button>
-                                <button class="chart-tab" onclick="switchView('real')" id="tabReal">Real (IPCA)</button>
+                            <div class="chart-tabs" role="tablist" aria-label="Visualização dos resultados">
+                                <button class="chart-tab active" role="tab" aria-selected="true" onclick="switchView('nominal')" id="tabNominal">Nominal</button>
+                                <button class="chart-tab" role="tab" aria-selected="false" onclick="switchView('real')" id="tabReal">Real (IPCA)</button>
                             </div>
                             <button type="button" class="chart-scale-toggle" id="scaleToggle" onclick="toggleChartScale()">Escala log</button>
                         </div>
@@ -503,7 +529,7 @@
                 <p style="margin-bottom: 8px;"><strong>Simulação:</strong> Bootstrap Monte Carlo com reamostragem com reposição dos retornos mensais históricos (20 anos, mar/2006 a fev/2026). Cada trajetória é independente e equiprovável.</p>
                 <p style="margin-bottom: 8px;"><strong>Retornos Reais:</strong> Ajustados pelo IPCA mensal (série 433 do BCB). Amostragem pareada garante consistência entre trajetórias nominais e reais.</p>
                 <p style="margin-bottom: 8px;"><strong>Conversão Cambial:</strong> Retornos de ativos internacionais convertidos para BRL usando variação mensal do câmbio USD/BRL.</p>
-                <p style="margin-bottom: 8px;"><strong>Retiradas:</strong> Aplicadas mensalmente (1/12 do valor anual por mês), corrigidas pela inflação acumulada (IPCA) da trajetória.</p>
+                <p style="margin-bottom: 8px;"><strong>Retiradas:</strong> No modo fixo, usa-se o valor anual informado. No modo SWR, a retirada inicial é um percentual do valor inicial e é reajustada mensalmente pela inflação (IPCA) ao longo da trajetória.</p>
                 <p style="margin-bottom: 8px;"><strong>Impostos sobre Dividendos:</strong> S&P 500 assume 0% WHT (via ETF sintético). Demais ativos internacionais consideram 15% WHT sobre dividendos.</p>
                 <p style="margin-bottom: 8px;"><strong>Substituição:</strong> Índices sem histórico completo de 20 anos têm alocação redistribuída proporcionalmente entre índices disponíveis da mesma categoria nos meses faltantes. Quando nenhum índice selecionado tem dados, utiliza-se um índice fallback da categoria.</p>
             </div>
@@ -518,6 +544,7 @@
         let CURRENT_Y_SCALE = 'linear';
         let RUNNING = false;
         let ALLOCATION_TOLERANCE_PCT = 0.6;
+        const PLOTLY_CONFIG = { responsive: true, displayModeBar: false, locale: 'pt-BR' };
 
         // Presets
         const PRESETS = {
@@ -550,6 +577,7 @@
                 loadState();
                 updateMethodology();
                 updateInitialValueHint();
+                updateWithdrawalHint();
             } catch (e) {
                 document.getElementById('allocationForm').textContent =
                     'Erro ao carregar dados: ' + e.message;
@@ -586,8 +614,9 @@
                         <div class="alloc-row">
                             <span class="alloc-name" title="${idx.desc}">${idx.name}${shortHist}</span>
                             <input class="alloc-input" type="number" id="alloc_${idx.key}"
-                                   data-key="${idx.key}" value="0" min="0" max="100" step="1"
-                                   oninput="updateTotal()">
+                                   data-key="${idx.key}" value="0" min="0" max="100" step="0.1"
+                                   inputmode="decimal" aria-label="Alocação em ${idx.name}"
+                                   oninput="updateTotal(); saveState()">
                             <span class="alloc-pct">%</span>
                         </div>`;
                 }
@@ -664,12 +693,33 @@
             const mode = document.getElementById('withdrawalMode').value;
             document.getElementById('withdrawalFixedGroup').style.display = mode === 'fixed' ? '' : 'none';
             document.getElementById('withdrawalPercentGroup').style.display = mode === 'percent' ? '' : 'none';
+            updateWithdrawalHint();
+            saveState();
         }
 
         function updateInitialValueHint() {
             const v = parseFloat(document.getElementById('initialValue').value);
             const el = document.getElementById('initialValueFmt');
             el.textContent = Number.isFinite(v) && v > 0 ? fmtBRLFull(v) : '';
+            updateWithdrawalHint();
+        }
+
+        function updateWithdrawalHint() {
+            const mode = document.getElementById('withdrawalMode').value;
+            const initialValue = parseFloat(document.getElementById('initialValue').value);
+            const el = document.getElementById('withdrawalHint');
+            if (!el) return;
+            if (!Number.isFinite(initialValue) || initialValue <= 0) { el.textContent = ''; return; }
+            if (mode === 'percent') {
+                const wp = parseFloat(document.getElementById('withdrawalPercent').value);
+                if (!Number.isFinite(wp) || wp <= 0) { el.textContent = ''; return; }
+                const annual = initialValue * (wp / 100);
+                el.textContent = wp.toFixed(1).replace('.', ',') + '% SWR = ' + fmtBRLFull(annual) + '/ano real (' + fmtBRLFull(annual / 12) + '/mês), calculado sobre o valor inicial.';
+            } else {
+                const wa = parseFloat(document.getElementById('withdrawal').value);
+                if (!Number.isFinite(wa) || wa <= 0) { el.textContent = ''; return; }
+                el.textContent = 'Retirada real fixa: ' + fmtBRLFull(wa) + '/ano (' + fmtBRLFull(wa / 12) + '/mês).';
+            }
         }
 
         function saveState() {
@@ -878,8 +928,12 @@
 
         function switchView(view) {
             CURRENT_VIEW = view;
-            document.getElementById('tabNominal').className = 'chart-tab' + (view === 'nominal' ? ' active' : '');
-            document.getElementById('tabReal').className = 'chart-tab' + (view === 'real' ? ' active' : '');
+            const nomTab = document.getElementById('tabNominal');
+            const realTab = document.getElementById('tabReal');
+            nomTab.className = 'chart-tab' + (view === 'nominal' ? ' active' : '');
+            realTab.className = 'chart-tab' + (view === 'nominal' ? '' : ' active');
+            nomTab.setAttribute('aria-selected', view === 'nominal' ? 'true' : 'false');
+            realTab.setAttribute('aria-selected', view === 'nominal' ? 'false' : 'true');
             document.getElementById('statsTitle').textContent =
                 view === 'nominal' ? 'Resultados Nominais' : 'Resultados Reais (ajustados pela inflação)';
 
@@ -966,6 +1020,9 @@
             // Drawdown metrics
             if (stats.median_max_drawdown != null) {
                 items.push({ label: 'Drawdown Mediano', value: (stats.median_max_drawdown * 100).toFixed(1) + '%', cls: 'negative' });
+            }
+            if (stats.p10_max_drawdown != null) {
+                items.push({ label: 'P10 Drawdown', value: (stats.p10_max_drawdown * 100).toFixed(1) + '%', cls: 'negative' });
             }
 
             grid.innerHTML = items.map(i => `
@@ -1082,8 +1139,9 @@
                 },
                 margin: { t: 50, r: 120, b: 50, l: 80 },
                 hovermode: 'x unified',
+                separators: ',.',
                 annotations: endAnnotations,
-            }, { responsive: true, displayModeBar: false });
+            }, PLOTLY_CONFIG);
         }
 
         function renderHistogram(stats, params, view) {
@@ -1182,7 +1240,8 @@
                 shapes: shapes,
                 annotations: annotations,
                 bargap: 0.05,
-            }, { responsive: true, displayModeBar: false });
+                separators: ',.',
+            }, PLOTLY_CONFIG);
         }
 
         function toggleMethodology() {
