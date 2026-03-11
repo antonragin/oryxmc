@@ -294,7 +294,18 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
     # Bootstrap: sample month indices with replacement
     sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
-    sampled_ipca = ipca[sampled_idx]
+
+    # Sample returns FIRST, before any arithmetic that creates temporaries
+    sampled_returns = portfolio_returns[sampled_idx].copy()
+    sampled_ipca = ipca[sampled_idx].copy()
+
+    # Debug: capture right after indexing, before any 1.0 + operations
+    _pr_min = float(portfolio_returns.min())
+    _pr_max = float(portfolio_returns.max())
+    _sr_min = float(sampled_returns.min())
+    _sr_max = float(sampled_returns.max())
+
+    sampled_real_returns = (1.0 + sampled_returns) / (1.0 + sampled_ipca) - 1.0
 
     # Vectorized cumulative inflation
     cum_inflation = np.empty((n_trajectories, n_months + 1), dtype=float)
@@ -315,16 +326,15 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             traj[:, t + 1] = np.maximum(traj[:, t + 1] - withdrawal, 0.0)
         return traj
 
-    sampled_returns = portfolio_returns[sampled_idx]
-    sampled_real_returns = (1.0 + sampled_returns) / (1.0 + sampled_ipca) - 1.0
-
     # Debug diagnostics
     _diag = {
         "sampled_idx_dtype": str(sampled_idx.dtype),
         "sampled_idx_min": int(sampled_idx.min()),
         "sampled_idx_max": int(sampled_idx.max()),
-        "sampled_returns_min": float(sampled_returns.min()),
-        "sampled_returns_max": float(sampled_returns.max()),
+        "portfolio_returns_min_inside": _pr_min,
+        "portfolio_returns_max_inside": _pr_max,
+        "sampled_returns_min": _sr_min,
+        "sampled_returns_max": _sr_max,
         "sampled_returns_mean": float(sampled_returns.mean()),
         "sampled_returns_shape": list(sampled_returns.shape),
         "cum_inflation_max": float(cum_inflation.max()),
