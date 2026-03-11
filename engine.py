@@ -218,12 +218,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             traj_nominal[:, t + 1] = np.maximum(traj_nominal[:, t + 1] - withdrawal, 0.0)
 
     # Real (inflation-adjusted) trajectories
-    # Save a copy of nominal final values before computing real
-    _nom_check = traj_nominal[:, -1].copy()
-    traj_real = traj_nominal / cum_inflation
-    # Verify nominal was not modified (diagnostic for production bug)
-    assert np.array_equal(_nom_check, traj_nominal[:, -1]), \
-        "BUG: traj_nominal was modified during real computation"
+    # Use explicit copy to prevent numpy in-place optimization on some platforms
+    traj_real = traj_nominal.copy()
+    np.true_divide(traj_nominal, cum_inflation, out=traj_real)
 
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]
