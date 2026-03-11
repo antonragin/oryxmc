@@ -67,11 +67,16 @@ def build_portfolio_returns(data, allocations):
     target_end = data["metadata"]["target_end"]
     all_months = sorted(m for m in data["ipca"] if target_start <= m <= target_end)
 
+    # Normalize weights to exactly 1.0
+    clean = {k: v for k, v in allocations.items() if v > 0}
+    total_weight = sum(clean.values())
+    if total_weight <= 0:
+        raise ValueError("Alocação total deve ser > 0")
+    allocations = {k: v / total_weight for k, v in clean.items()}
+
     # Group allocations by category
     cat_allocs = {}
     for idx_key, weight in allocations.items():
-        if weight <= 0:
-            continue
         cat = data["indices"][idx_key]["category"]
         cat_allocs.setdefault(cat, {})[idx_key] = weight
 
@@ -173,7 +178,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     """
     Run Monte Carlo simulation using bootstrap resampling.
 
-    Withdrawals are applied at the END of each year (month 12, 24, 36, ...),
+    Withdrawals are applied monthly (1/12 of annual amount per month),
     adjusted for cumulative inflation in that trajectory.
     """
     if seed is not None:
@@ -182,6 +187,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     n_months = n_years * 12
     n_hist = len(portfolio_returns)
     has_withdrawals = withdrawal_annual > 0
+    monthly_withdrawal_real = withdrawal_annual / 12.0
 
     # Bootstrap: sample month indices with replacement
     sampled_idx = np.random.randint(0, n_hist, size=(n_trajectories, n_months))
@@ -197,9 +203,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         traj_nominal[:, t + 1] = traj_nominal[:, t] * (1 + sampled_returns[:, t])
         cum_inflation[:, t + 1] = cum_inflation[:, t] * (1 + sampled_ipca[:, t])
 
-        # Withdraw at end of each year (after month 12, 24, 36, ...)
-        if has_withdrawals and (t + 1) % 12 == 0:
-            withdrawal = withdrawal_annual * cum_inflation[:, t + 1]
+        # Monthly withdrawal adjusted for cumulative inflation
+        if has_withdrawals:
+            withdrawal = monthly_withdrawal_real * cum_inflation[:, t + 1]
             traj_nominal[:, t + 1] = np.maximum(traj_nominal[:, t + 1] - withdrawal, 0.0)
 
     # Real (inflation-adjusted) trajectories
