@@ -355,6 +355,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     # Real returns: (1+r)/(1+i) - 1 = expm1(log1p(r) - log1p(i))
     log_ret = np.log1p(sampled_returns)    # does NOT modify sampled_returns
     log_ipca = np.log1p(sampled_ipca)      # does NOT modify sampled_ipca
+    del sampled_ipca  # free memory — log_ipca captured all we need
     sampled_real_returns = np.expm1(log_ret - log_ipca)
     del log_ret  # free memory — no longer needed after real returns computed
 
@@ -376,7 +377,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     del log_ipca  # free memory — no longer needed
     cum_inflation = np.ones((n_trajectories, n_months + 1), dtype=float)
     cum_inflation[:, 1:] = np.exp(cum_log_ipca)
-    del sampled_ipca, cum_log_ipca  # free memory — no longer needed
+    del cum_log_ipca  # free memory — no longer needed
 
     def simulate_nominal_paths(monthly_rets):
         """Build trajectory from monthly returns (not log returns)."""
@@ -406,6 +407,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     if benchmark_returns is not None:
         benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
         benchmark_real = benchmark_nominal / cum_inflation
+    del cum_inflation  # free memory — no longer needed before compute_stats
 
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]

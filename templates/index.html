@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OryxMC — Simulador Monte Carlo</title>
+    <link rel="icon" href="data:,">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -448,7 +449,7 @@
                         <div class="param-group">
                             <label>Valor Inicial (R$)</label>
                             <input type="number" id="initialValue" value="1000000" min="1000" max="1000000000000" step="10000" oninput="updateInitialValueHint(); updateWithdrawalHint(); saveState()">
-                            <div id="initialValueFmt" style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">R$ 1.000.000</div>
+                            <div id="initialValueFmt" style="margin-top: 4px; font-size: 11px; color: var(--text-muted); min-height: 14px;">R$ 1.000.000</div>
                         </div>
                         <div class="param-group">
                             <label>Horizonte (anos)</label>
@@ -496,7 +497,7 @@
                             <input type="number" id="seed" min="0" max="9007199254740991" step="1" placeholder="Aleatória" oninput="saveState()">
                         </div>
                     </div>
-                    <div id="withdrawalHint" class="input-help" aria-live="polite"></div>
+                    <div id="withdrawalHint" class="input-help" aria-live="polite" style="min-height: 16px;"></div>
                     <button class="btn-run" id="runBtn" onclick="runSimulation()" disabled>
                         Executar Simulação
                     </button>
@@ -809,7 +810,8 @@
             } else {
                 const wa = parseFloat(document.getElementById('withdrawal').value);
                 if (!Number.isFinite(wa) || wa <= 0) { el.textContent = ''; return; }
-                el.textContent = 'Retirada real fixa: ' + fmtBRLFull(wa) + '/ano (' + fmtBRLFull(wa / 12) + '/mês).';
+                const pct = (wa / initialValue * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+                el.textContent = 'Retirada real fixa: ' + fmtBRLFull(wa) + '/ano (' + fmtBRLFull(wa / 12) + '/mês) \u2248 ' + pct + '% do valor inicial.';
             }
         }
 
