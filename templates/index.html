@@ -363,6 +363,7 @@
                         <button class="preset-btn" onclick="applyPreset('moderate')">Moderado</button>
                         <button class="preset-btn" onclick="applyPreset('aggressive')">Agressivo</button>
                         <button class="preset-btn" onclick="applyPreset('global')">Global Diversificado</button>
+                        <button class="preset-btn" onclick="normalizeAllocations()">Normalizar 100%</button>
                         <button class="preset-btn" onclick="applyPreset('clear')">Limpar</button>
                     </div>
 
@@ -383,7 +384,8 @@
                     <div class="param-grid">
                         <div class="param-group">
                             <label>Valor Inicial (R$)</label>
-                            <input type="number" id="initialValue" value="1000000" min="1000" step="10000">
+                            <input type="number" id="initialValue" value="1000000" min="1000" step="10000" oninput="updateInitialValueHint()">
+                            <div id="initialValueFmt" style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">R$ 1.000.000</div>
                         </div>
                         <div class="param-group">
                             <label>Horizonte (anos)</label>
@@ -397,8 +399,19 @@
                             </select>
                         </div>
                         <div class="param-group">
-                            <label>Retirada Anual Real (R$ de hoje)</label>
-                            <input type="number" id="withdrawal" value="0" min="0" step="10000" title="Valor anual retirado, corrigido pelo IPCA ao longo da simulação">
+                            <label>Modo de Retirada</label>
+                            <select id="withdrawalMode" onchange="updateWithdrawalUI()">
+                                <option value="fixed" selected>Valor fixo real (R$)</option>
+                                <option value="percent">% do patrimônio (SWR)</option>
+                            </select>
+                        </div>
+                        <div class="param-group" id="withdrawalFixedGroup">
+                            <label>Retirada Anual Real (R$)</label>
+                            <input type="number" id="withdrawal" value="0" min="0" step="10000">
+                        </div>
+                        <div class="param-group" id="withdrawalPercentGroup" style="display:none;">
+                            <label>Taxa SWR (% a.a.)</label>
+                            <input type="number" id="withdrawalPercent" value="0" min="0" max="20" step="0.1">
                         </div>
                         <div class="param-group">
                             <label>Trajetórias</label>
@@ -509,7 +522,9 @@
                 INDICES = data.indices;
                 METADATA = data.metadata || {};
                 renderAllocationForm();
+                loadState();
                 updateMethodology();
+                updateInitialValueHint();
             } catch (e) {
                 document.getElementById('allocationForm').textContent =
                     'Erro ao carregar dados: ' + e.message;
@@ -593,12 +608,80 @@
             updateTotal();
         }
 
+        function normalizeAllocations() {
+            const inputs = document.querySelectorAll('.alloc-input');
+            let total = 0;
+            inputs.forEach(inp => { total += parseFloat(inp.value) || 0; });
+            if (total <= 0) return;
+            inputs.forEach(inp => {
+                const v = parseFloat(inp.value) || 0;
+                inp.value = Math.round(v / total * 1000) / 10;
+            });
+            updateTotal();
+        }
+
+        function updateWithdrawalUI() {
+            const mode = document.getElementById('withdrawalMode').value;
+            document.getElementById('withdrawalFixedGroup').style.display = mode === 'fixed' ? '' : 'none';
+            document.getElementById('withdrawalPercentGroup').style.display = mode === 'percent' ? '' : 'none';
+        }
+
+        function updateInitialValueHint() {
+            const v = parseFloat(document.getElementById('initialValue').value);
+            const el = document.getElementById('initialValueFmt');
+            el.textContent = Number.isFinite(v) && v > 0 ? fmtBRLFull(v) : '';
+        }
+
+        function saveState() {
+            try {
+                const allocs = {};
+                document.querySelectorAll('.alloc-input').forEach(inp => {
+                    const v = parseFloat(inp.value) || 0;
+                    if (v > 0) allocs[inp.dataset.key] = v;
+                });
+                const state = {
+                    allocations: allocs,
+                    initialValue: document.getElementById('initialValue').value,
+                    nYears: document.getElementById('nYears').value,
+                    withdrawal: document.getElementById('withdrawal').value,
+                    withdrawalMode: document.getElementById('withdrawalMode').value,
+                    withdrawalPercent: document.getElementById('withdrawalPercent').value,
+                    nTraj: document.getElementById('nTraj').value,
+                };
+                localStorage.setItem('oryxmc_state', JSON.stringify(state));
+            } catch {}
+        }
+
+        function loadState() {
+            try {
+                const raw = localStorage.getItem('oryxmc_state');
+                if (!raw) return;
+                const state = JSON.parse(raw);
+                if (state.allocations) {
+                    document.querySelectorAll('.alloc-input').forEach(inp => {
+                        inp.value = state.allocations[inp.dataset.key] || 0;
+                    });
+                }
+                if (state.initialValue) document.getElementById('initialValue').value = state.initialValue;
+                if (state.nYears) document.getElementById('nYears').value = state.nYears;
+                if (state.withdrawal) document.getElementById('withdrawal').value = state.withdrawal;
+                if (state.withdrawalMode) document.getElementById('withdrawalMode').value = state.withdrawalMode;
+                if (state.withdrawalPercent) document.getElementById('withdrawalPercent').value = state.withdrawalPercent;
+                if (state.nTraj) document.getElementById('nTraj').value = state.nTraj;
+                updateWithdrawalUI();
+                updateTotal();
+                updateInitialValueHint();
+            } catch {}
+        }
+
         function setFormDisabled(disabled) {
             document.querySelectorAll('.alloc-input').forEach(inp => inp.disabled = disabled);
             document.querySelectorAll('.preset-btn').forEach(btn => btn.disabled = disabled);
             document.getElementById('initialValue').disabled = disabled;
             document.getElementById('nYears').disabled = disabled;
             document.getElementById('withdrawal').disabled = disabled;
+            document.getElementById('withdrawalPercent').disabled = disabled;
+            document.getElementById('withdrawalMode').disabled = disabled;
             document.getElementById('nTraj').disabled = disabled;
         }
 
@@ -623,13 +706,39 @@
 
             const initialValue = parseFloat(document.getElementById('initialValue').value);
             const nYears = parseInt(document.getElementById('nYears').value, 10);
-            const withdrawalAnnual = parseFloat(document.getElementById('withdrawal').value) || 0;
+            const withdrawalMode = document.getElementById('withdrawalMode').value;
             const nTraj = parseInt(document.getElementById('nTraj').value, 10);
 
             if (!Number.isFinite(initialValue) || initialValue <= 0) {
                 errEl.textContent = 'Valor inicial inválido.';
                 errEl.style.display = 'block';
                 return;
+            }
+
+            const payload = {
+                allocations,
+                initial_value: initialValue,
+                n_years: nYears,
+                n_trajectories: nTraj,
+                withdrawal_mode: withdrawalMode,
+            };
+            if (withdrawalMode === 'percent') {
+                const wp = parseFloat(document.getElementById('withdrawalPercent').value);
+                if (!Number.isFinite(wp) || wp < 0) {
+                    errEl.textContent = 'Taxa SWR inválida.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                payload.withdrawal_percent = wp;
+                payload.withdrawal_annual = 0;
+            } else {
+                const wa = parseFloat(document.getElementById('withdrawal').value);
+                if (!Number.isFinite(wa) || wa < 0) {
+                    errEl.textContent = 'Retirada anual inválida.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                payload.withdrawal_annual = wa;
             }
 
             RUNNING = true;
@@ -642,17 +751,13 @@
             document.getElementById('placeholder').style.display = 'flex';
             document.getElementById('placeholder').textContent = 'Simulando...';
 
+            saveState();
+
             try {
                 const res = await fetch('/api/simulate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        allocations,
-                        initial_value: initialValue,
-                        n_years: nYears,
-                        withdrawal_annual: withdrawalAnnual,
-                        n_trajectories: nTraj,
-                    }),
+                    body: JSON.stringify(payload),
                 });
                 if (res.status === 401) { window.location = '/login'; return; }
                 if (!res.ok) {
@@ -727,14 +832,21 @@
             renderHistogram(stats, params, view);
         }
 
+        const _brlFull = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+        const _brlDec = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 });
+
         function fmtBRL(v) {
             if (!Number.isFinite(v)) return '—';
-            const sign = v < 0 ? '-' : '';
             const a = Math.abs(v);
-            if (a >= 999500) return sign + 'R$ ' + (a / 1e6).toFixed(2) + 'M';
-            if (a >= 1e3) return sign + 'R$ ' + (a / 1e3).toFixed(a < 1e4 ? 1 : 0) + 'k';
-            if (a < 1) return sign + 'R$ ' + a.toFixed(2);
-            return sign + 'R$ ' + a.toFixed(0);
+            if (a >= 999500) return (v < 0 ? '-' : '') + 'R$ ' + (a / 1e6).toFixed(2).replace('.', ',') + 'M';
+            if (a >= 1e3) return _brlFull.format(v);
+            if (a < 1) return _brlDec.format(v);
+            return _brlFull.format(v);
+        }
+
+        function fmtBRLFull(v) {
+            if (!Number.isFinite(v)) return '—';
+            return _brlFull.format(v);
         }
 
         function renderStats(stats, params) {
@@ -967,6 +1079,18 @@
                 toggle.innerHTML = '&#9660; Mostrar';
             }
         }
+
+        // Enter key to run simulation
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !RUNNING) {
+                const tag = document.activeElement?.tagName;
+                if (tag === 'INPUT' || tag === 'SELECT') {
+                    e.preventDefault();
+                    const btn = document.getElementById('runBtn');
+                    if (!btn.disabled) runSimulation();
+                }
+            }
+        });
 
         // Init
         init();

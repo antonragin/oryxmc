@@ -2,21 +2,29 @@
 import os
 import math
 import hmac
+import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from functools import wraps
 import engine
 
+ALLOCATION_TOLERANCE = 0.006  # ±0.6% — shared across frontend and backend
+
+IS_PROD = bool(os.environ.get("RENDER") or os.environ.get("FLASK_ENV") == "production")
+
 app = Flask(__name__)
 _secret = os.environ.get("SECRET_KEY")
-if not _secret and os.environ.get("RENDER"):
+APP_PASSWORD = os.environ.get("APP_PASSWORD")
+if IS_PROD and not _secret:
     raise RuntimeError("SECRET_KEY must be set in production")
-app.secret_key = _secret or "dev-only-insecure-key"
+if IS_PROD and not APP_PASSWORD:
+    raise RuntimeError("APP_PASSWORD must be set in production")
+app.secret_key = _secret or secrets.token_hex(32)
+APP_PASSWORD = APP_PASSWORD or "oryx2026"
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MB max request
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 if _secret:
     app.config["SESSION_COOKIE_SECURE"] = True
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "oryx2026")
 
 # Load data once at startup
 DATA = engine.load_data()
@@ -68,6 +76,7 @@ def api_indices():
             "target_end": DATA["metadata"]["target_end"],
             "n_months": len([m for m in DATA["ipca"]
                             if DATA["metadata"]["target_start"] <= m <= DATA["metadata"]["target_end"]]),
+            "allocation_tolerance_pct": ALLOCATION_TOLERANCE * 100,
         },
     })
 
@@ -115,8 +124,25 @@ def api_simulate():
             return jsonify({"error": "Valor inicial inválido"}), 400
         if n_years <= 0 or n_years > 50:
             return jsonify({"error": "Horizonte deve ser entre 1 e 50 anos"}), 400
-        if not math.isfinite(withdrawal_annual) or withdrawal_annual < 0:
-            return jsonify({"error": "Retirada anual não pode ser negativa"}), 400
+        # Handle withdrawal mode (fixed BRL vs % of initial capital / SWR)
+        withdrawal_mode = params.get("withdrawal_mode", "fixed")
+        if withdrawal_mode not in ("fixed", "percent"):
+            return jsonify({"error": "Modo de retirada inválido"}), 400
+        if withdrawal_mode == "percent":
+            wp_raw = params.get("withdrawal_percent", 0)
+            if isinstance(wp_raw, bool):
+                return jsonify({"error": "Taxa SWR inválida"}), 400
+            try:
+                withdrawal_percent = float(wp_raw)
+            except (TypeError, ValueError, OverflowError):
+                return jsonify({"error": "Taxa SWR inválida"}), 400
+            if not math.isfinite(withdrawal_percent) or withdrawal_percent < 0 or withdrawal_percent > 100:
+                return jsonify({"error": "Taxa SWR deve ser entre 0% e 100%"}), 400
+            withdrawal_annual = initial_value * (withdrawal_percent / 100.0)
+        else:
+            withdrawal_percent = None
+            if not math.isfinite(withdrawal_annual) or withdrawal_annual < 0:
+                return jsonify({"error": "Retirada anual não pode ser negativa"}), 400
         if n_trajectories <= 0 or n_trajectories > 20000:
             return jsonify({"error": "Número de trajetórias deve ser entre 1 e 20.000"}), 400
 
@@ -142,7 +168,7 @@ def api_simulate():
 
         allocations = clean_allocations
         total = sum(allocations.values())
-        if not math.isfinite(total) or abs(total - 1.0) > 0.006:
+        if not math.isfinite(total) or abs(total - 1.0) > ALLOCATION_TOLERANCE:
             return jsonify({"error": f"Alocações devem somar 100% (atual: {total*100:.1f}%)"}), 400
 
         # Build portfolio returns with substitution
