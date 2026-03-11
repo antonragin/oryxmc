@@ -400,12 +400,12 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
     # Portfolio trajectories
     traj_nominal = simulate_nominal_paths(sampled_returns)
-    traj_real = (traj_nominal.copy()) / cum_inflation
+    traj_real = traj_nominal / cum_inflation  # / always creates a new array
 
     # Benchmark trajectories (same sampled months, same cumulative inflation)
     if benchmark_returns is not None:
         benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
-        benchmark_real = (benchmark_nominal.copy()) / cum_inflation
+        benchmark_real = benchmark_nominal / cum_inflation
 
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]
@@ -428,7 +428,8 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         if not has_withdrawals:
             # Without withdrawals, trajectories ARE the cash-flow-neutral path
             twr_cagrs = cagrs
-            peaks = np.maximum.accumulate(trajectories, axis=1)
+            # .copy() protects trajectories from np.maximum.accumulate mutation bug
+            peaks = np.maximum.accumulate(trajectories.copy(), axis=1)
             drawdowns = trajectories / peaks - 1.0
             max_dd = drawdowns.min(axis=1)
             del peaks, drawdowns
@@ -440,7 +441,8 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             nav_paths[:, 1:] = np.exp(np.cumsum(log_sampled.copy(), axis=1))
             del log_sampled
             twr_cagrs = np.power(nav_paths[:, -1], 1.0 / n_years) - 1.0
-            peaks = np.maximum.accumulate(nav_paths, axis=1)
+            # .copy() protects nav_paths from np.maximum.accumulate mutation bug
+            peaks = np.maximum.accumulate(nav_paths.copy(), axis=1)
             drawdowns = nav_paths / peaks - 1.0
             max_dd = drawdowns.min(axis=1)
             del peaks, drawdowns, nav_paths
