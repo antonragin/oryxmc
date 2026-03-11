@@ -335,10 +335,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         "cum_inflation_max": float(cum_inflation.max()),
     }
 
-    # Portfolio trajectories
+    # Portfolio trajectories — avoid out= parameter (Render numpy bug)
     traj_nominal = simulate_nominal_paths(log_ret)
-    traj_real = traj_nominal.copy()
-    np.true_divide(traj_nominal, cum_inflation, out=traj_real)
+    traj_real = traj_nominal / cum_inflation
 
     # Benchmark trajectories (same sampled months)
     benchmark_nominal = None
@@ -350,8 +349,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         log_bench = np.log1p(sampled_benchmark)
         sampled_benchmark_real = np.expm1(log_bench - log_ipca)
         benchmark_nominal = simulate_nominal_paths(log_bench)
-        benchmark_real = benchmark_nominal.copy()
-        np.true_divide(benchmark_nominal, cum_inflation, out=benchmark_real)
+        benchmark_real = benchmark_nominal / cum_inflation
 
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]
