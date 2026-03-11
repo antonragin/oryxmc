@@ -4,6 +4,7 @@ import math
 import hmac
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from werkzeug.exceptions import RequestEntityTooLarge
 from functools import wraps
 import engine
 
@@ -49,6 +50,13 @@ def login_required(f):
     return decorated
 
 
+@app.errorhandler(RequestEntityTooLarge)
+def handle_413(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Requisição muito grande"}), 413
+    return "Requisição muito grande", 413
+
+
 @app.after_request
 def add_security_headers(response):
     response.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate, private")
@@ -81,6 +89,7 @@ def login():
     if request.method == "POST":
         pwd = request.form.get("password", "")
         if hmac.compare_digest(pwd, APP_PASSWORD):
+            session.clear()
             session["authenticated"] = True
             return redirect(url_for("index"))
         error = "Senha incorreta"

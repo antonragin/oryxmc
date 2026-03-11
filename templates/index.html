@@ -479,6 +479,7 @@
                         <div class="param-group">
                             <label>Trajetórias</label>
                             <select id="nTraj" onchange="saveState()">
+                                <option value="1000">1.000</option>
                                 <option value="5000">5.000</option>
                                 <option value="10000" selected>10.000</option>
                                 <option value="20000">20.000</option>
@@ -678,7 +679,15 @@
                 el.textContent = total.toFixed(1).replace('.', ',') + '% (excede ' + Math.abs(remaining).toFixed(1).replace('.', ',') + '%)';
             }
             el.className = 'total-value ' + (valid ? 'ok' : 'err');
-            document.getElementById('runBtn').disabled = RUNNING || !valid;
+            const comboValid = isRunComboValid();
+            document.getElementById('runBtn').disabled = RUNNING || !valid || !comboValid;
+        }
+
+        function isRunComboValid() {
+            const year = document.getElementById('nYears').value;
+            const traj = document.getElementById('nTraj').value;
+            const allowed = (ALLOWED_RUNS[year] || []).map(String);
+            return allowed.includes(traj);
         }
 
         function applyPreset(name) {
@@ -725,6 +734,7 @@
                 const first = [...trajSel.options].find(o => !o.disabled);
                 if (first) trajSel.value = first.value;
             }
+            updateTotal();
         }
 
         function updateWithdrawalUI() {

@@ -253,8 +253,9 @@ def build_portfolio_returns(data, allocations):
                 f"em {log['fallback_months']} meses utilizou-se {fb_name} como proxy"
             )
         warnings.append(
-            f"{idx_info['name']} ({weight*100:.0f}%) — disponível desde "
-            f"{idx_info['start_date']}. Nos {total_missing} meses anteriores: "
+            f"{idx_info['name']} ({weight*100:.1f}%) — histórico "
+            f"{idx_info['start_date']} a {idx_info['end_date']}. "
+            f"Substituição em {total_missing} meses: "
             + "; ".join(parts) + "."
         )
 
@@ -371,9 +372,11 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         cagrs[valid] = np.power(final[valid] / initial_value, 1 / n_years) - 1
 
         # Cash-flow-neutral NAV for drawdown/TWR (unaffected by withdrawals)
+        # Use .copy() to prevent numpy mutation of sampled_rets
+        log_sampled = np.log1p(sampled_rets.copy())
         nav_paths = np.empty((sampled_rets.shape[0], sampled_rets.shape[1] + 1), dtype=float)
         nav_paths[:, 0] = 1.0
-        nav_paths[:, 1:] = np.exp(np.cumsum(np.log1p(sampled_rets), axis=1))
+        nav_paths[:, 1:] = np.exp(np.cumsum(log_sampled, axis=1))
 
         twr_cagrs = np.power(nav_paths[:, -1], 1.0 / n_years) - 1.0
         ann_vol = (np.std(sampled_rets, axis=1, ddof=1) * np.sqrt(12)
