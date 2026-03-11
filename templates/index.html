@@ -394,9 +394,10 @@
                             </select>
                         </div>
                     </div>
-                    <button class="btn-run" id="runBtn" onclick="runSimulation()">
+                    <button class="btn-run" id="runBtn" onclick="runSimulation()" disabled>
                         Executar Simulação
                     </button>
+                    <div id="errorMsg" style="display:none; margin-top: 10px; padding: 10px 14px; background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); border-radius: 6px; color: #f87171; font-size: 13px;"></div>
                 </div>
             </div>
 
@@ -441,19 +442,20 @@
             </div>
         </div>
 
-        <!-- Methodology Footer -->
+        <!-- Methodology Footer (collapsible) -->
         <div class="card" style="margin-top: 24px;">
-            <div class="card-title">
+            <div class="card-title" style="cursor: pointer; user-select: none;" onclick="toggleMethodology()">
                 <span class="icon">&#9432;</span>
                 Metodologia
+                <span id="methToggle" style="margin-left: auto; font-size: 12px; color: var(--text-muted);">&#9660; Mostrar</span>
             </div>
-            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.7; columns: 2; column-gap: 32px;">
+            <div id="methodologyContent" style="display: none; font-size: 12px; color: var(--text-secondary); line-height: 1.7; columns: 2; column-gap: 32px;">
                 <p style="margin-bottom: 8px;"><strong>Simulação:</strong> Bootstrap Monte Carlo com reamostragem com reposição dos retornos mensais históricos (20 anos, mar/2006 a fev/2026). Cada trajetória é independente e equiprovável.</p>
                 <p style="margin-bottom: 8px;"><strong>Retornos Reais:</strong> Ajustados pelo IPCA mensal (série 433 do BCB). Amostragem pareada garante consistência entre trajetórias nominais e reais.</p>
                 <p style="margin-bottom: 8px;"><strong>Conversão Cambial:</strong> Retornos de ativos internacionais convertidos para BRL usando variação mensal do câmbio USD/BRL.</p>
-                <p style="margin-bottom: 8px;"><strong>Retiradas:</strong> Aplicadas no início de cada ano, corrigidas pela inflação acumulada da trajetória.</p>
+                <p style="margin-bottom: 8px;"><strong>Retiradas:</strong> Aplicadas ao final de cada ano, corrigidas pela inflação acumulada da trajetória.</p>
                 <p style="margin-bottom: 8px;"><strong>Impostos sobre Dividendos:</strong> S&P 500 assume 0% WHT (via ETF sintético). Demais ativos internacionais consideram 15% WHT sobre dividendos.</p>
-                <p style="margin-bottom: 8px;"><strong>Substituição:</strong> Índices sem histórico completo de 20 anos têm alocação redistribuída proporcionalmente entre índices disponíveis da mesma categoria nos meses faltantes.</p>
+                <p style="margin-bottom: 8px;"><strong>Substituição:</strong> Índices sem histórico completo de 20 anos têm alocação redistribuída proporcionalmente entre índices disponíveis da mesma categoria nos meses faltantes. Quando nenhum índice selecionado tem dados, utiliza-se um índice fallback da categoria.</p>
             </div>
         </div>
     </div>
@@ -518,8 +520,15 @@
             let total = 0;
             inputs.forEach(inp => { total += parseFloat(inp.value) || 0; });
             const el = document.getElementById('totalAlloc');
-            el.textContent = total.toFixed(0) + '%';
-            el.className = 'total-value ' + (Math.abs(total - 100) < 0.5 ? 'ok' : 'err');
+            const remaining = 100 - total;
+            const valid = Math.abs(remaining) < 0.5;
+            if (valid) {
+                el.textContent = '100%';
+            } else {
+                el.textContent = total.toFixed(0) + '% (faltam ' + remaining.toFixed(0) + '%)';
+            }
+            el.className = 'total-value ' + (valid ? 'ok' : 'err');
+            document.getElementById('runBtn').disabled = !valid;
         }
 
         function applyPreset(name) {
@@ -540,8 +549,12 @@
             });
 
             const total = Object.values(allocations).reduce((a, b) => a + b, 0);
+            const errEl = document.getElementById('errorMsg');
+            errEl.style.display = 'none';
+
             if (Math.abs(total - 1.0) > 0.01) {
-                alert('A alocação total deve ser 100%.');
+                errEl.textContent = 'A alocação total deve ser 100%.';
+                errEl.style.display = 'block';
                 return;
             }
 
@@ -562,13 +575,15 @@
                 });
                 const data = await res.json();
                 if (data.error) {
-                    alert('Erro: ' + data.error);
+                    errEl.textContent = data.error;
+                    errEl.style.display = 'block';
                     return;
                 }
                 RESULTS = data;
                 renderResults();
             } catch (e) {
-                alert('Erro na simulação: ' + e.message);
+                errEl.textContent = 'Erro na simulação: ' + e.message;
+                errEl.style.display = 'block';
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = 'Executar Simulação';
@@ -583,8 +598,13 @@
             const wBox = document.getElementById('warningsBox');
             if (RESULTS.warnings && RESULTS.warnings.length > 0) {
                 wBox.style.display = 'block';
-                document.getElementById('warningsText').innerHTML =
-                    RESULTS.warnings.map(w => `<p>${w}</p>`).join('');
+                const wText = document.getElementById('warningsText');
+                wText.innerHTML = '';
+                RESULTS.warnings.forEach(w => {
+                    const p = document.createElement('p');
+                    p.textContent = w;
+                    wText.appendChild(p);
+                });
             } else {
                 wBox.style.display = 'none';
             }
@@ -742,58 +762,82 @@
         }
 
         function renderHistogram(stats, params, view) {
-            // Get final values from sample trajectories (we have 20)
-            // Instead, use the percentile data to create a summary
-            const p = stats.percentiles;
-            const finalIdx = p['50'].length - 1;
-            const markers = [
-                { name: 'P5', val: stats.final_p5, color: '#f87171' },
-                { name: 'P25', val: stats.final_p25, color: '#fb923c' },
-                { name: 'Mediana', val: stats.final_median, color: '#22d3ee' },
-                { name: 'P75', val: stats.final_p75, color: '#34d399' },
-                { name: 'P95', val: stats.final_p95, color: '#34d399' },
-            ];
+            const hist = stats.histogram;
+            const mids = hist.mids;
+            const counts = hist.counts;
+
+            // Color bars based on whether they're above or below initial value
+            const barColors = mids.map(m =>
+                m >= params.initial_value ? 'rgba(52, 211, 153, 0.7)' : 'rgba(248, 113, 113, 0.7)'
+            );
+
+            // Compute bin width for proper bar display
+            const binWidth = mids.length > 1 ? mids[1] - mids[0] : 1;
 
             const trace = {
-                x: markers.map(m => m.name),
-                y: markers.map(m => m.val),
+                x: mids,
+                y: counts,
                 type: 'bar',
-                marker: {
-                    color: markers.map(m => m.color),
-                    opacity: 0.8,
-                },
-                text: markers.map(m => fmtBRL(m.val)),
-                textposition: 'outside',
-                textfont: { color: '#e2e8f0', size: 12 },
-                hovertemplate: '%{x}: R$ %{y:,.0f}<extra></extra>',
+                marker: { color: barColors },
+                width: binWidth * 0.9,
+                hovertemplate: 'R$ %{x:,.0f}<br>%{y} trajetórias<extra></extra>',
             };
+
+            // Vertical line for median
+            const shapes = [{
+                type: 'line', x0: stats.final_median, x1: stats.final_median,
+                y0: 0, y1: Math.max(...counts) * 1.05,
+                line: { color: '#22d3ee', dash: 'dash', width: 2 },
+            }, {
+                type: 'line', x0: params.initial_value, x1: params.initial_value,
+                y0: 0, y1: Math.max(...counts) * 1.05,
+                line: { color: 'rgba(148,163,184,0.5)', dash: 'dot', width: 1 },
+            }];
+
+            const annotations = [{
+                x: stats.final_median, y: Math.max(...counts) * 1.05,
+                text: 'Mediana: ' + fmtBRL(stats.final_median),
+                showarrow: false, font: { size: 11, color: '#22d3ee' }, yshift: 10,
+            }, {
+                x: params.initial_value, y: Math.max(...counts) * 0.95,
+                text: 'Valor Inicial', showarrow: false,
+                font: { size: 10, color: '#94a3b8' }, yshift: 10,
+            }];
 
             Plotly.newPlot('histChart', [trace], {
                 title: {
-                    text: view === 'nominal' ? 'Valor Final por Percentil (Nominal)' : 'Valor Final por Percentil (Real)',
+                    text: view === 'nominal' ? 'Distribuição do Valor Final (Nominal)' : 'Distribuição do Valor Final (Real)',
                     font: { size: 14, color: '#e2e8f0' }, x: 0.02,
                 },
-                xaxis: { color: '#94a3b8' },
+                xaxis: {
+                    title: 'Valor Final (R$)', color: '#94a3b8',
+                    gridcolor: 'rgba(100,116,139,0.1)', tickformat: ',.0f',
+                },
                 yaxis: {
-                    color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)',
-                    tickformat: ',.0f',
+                    title: 'Frequência', color: '#94a3b8',
+                    gridcolor: 'rgba(100,116,139,0.15)',
                 },
                 paper_bgcolor: 'transparent',
                 plot_bgcolor: 'transparent',
                 font: { family: 'Inter, sans-serif', color: '#94a3b8' },
-                margin: { t: 45, r: 20, b: 40, l: 80 },
+                margin: { t: 45, r: 20, b: 50, l: 80 },
                 showlegend: false,
-                shapes: [{
-                    type: 'line', x0: -0.5, x1: 4.5,
-                    y0: params.initial_value, y1: params.initial_value,
-                    line: { color: 'rgba(148,163,184,0.5)', dash: 'dot', width: 1 },
-                }],
-                annotations: [{
-                    x: 4.3, y: params.initial_value,
-                    text: 'Valor Inicial', showarrow: false,
-                    font: { size: 10, color: '#94a3b8' }, yshift: 12,
-                }],
+                shapes: shapes,
+                annotations: annotations,
+                bargap: 0.05,
             }, { responsive: true, displayModeBar: false });
+        }
+
+        function toggleMethodology() {
+            const content = document.getElementById('methodologyContent');
+            const toggle = document.getElementById('methToggle');
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                toggle.innerHTML = '&#9650; Ocultar';
+            } else {
+                content.style.display = 'none';
+                toggle.innerHTML = '&#9660; Mostrar';
+            }
         }
 
         // Init

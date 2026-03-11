@@ -208,6 +208,10 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         valid = final > 0
         cagrs = np.where(valid, np.power(final / initial_value, 1 / n_years) - 1, -1.0)
 
+        # Histogram of final values (30 bins)
+        hist_counts, hist_edges = np.histogram(final, bins=30)
+        hist_mids = ((hist_edges[:-1] + hist_edges[1:]) / 2).tolist()
+
         stats = {
             "percentiles": pct_lines,
             "time_years": time_years.tolist(),
@@ -220,8 +224,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             "final_p25": float(np.percentile(final, 25)),
             "final_p75": float(np.percentile(final, 75)),
             "final_p95": float(np.percentile(final, 95)),
-            "sample_trajectories": trajectories[:20, :].tolist(),
+            "sample_trajectories": trajectories[:8, :].tolist(),
             "has_withdrawals": has_withdrawals,
+            "histogram": {"counts": hist_counts.tolist(), "mids": hist_mids},
         }
 
         if has_withdrawals:
