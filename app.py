@@ -28,7 +28,9 @@ if _secret:
 
 # Load data once at startup
 DATA = engine.load_data()
+engine.validate_data(DATA)
 INDICES = engine.get_available_indices(DATA)
+BENCHMARK_CDI = engine.build_portfolio_returns(DATA, {"CDI": 1.0})
 
 
 def login_required(f):
@@ -158,6 +160,8 @@ def api_simulate():
         for key, val in allocations.items():
             if key not in DATA["indices"]:
                 return jsonify({"error": f"Índice desconhecido: {key}"}), 400
+            if isinstance(val, bool):
+                return jsonify({"error": f"Alocação inválida: {key}"}), 400
             try:
                 val = float(val)
             except (TypeError, ValueError, OverflowError):
@@ -182,6 +186,8 @@ def api_simulate():
             n_years=n_years,
             n_trajectories=n_trajectories,
             withdrawal_annual=withdrawal_annual,
+            benchmark_returns=BENCHMARK_CDI["portfolio_returns"],
+            benchmark_name="CDI",
         )
         results["warnings"] = portfolio["warnings"]
 

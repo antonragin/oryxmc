@@ -34,6 +34,92 @@ def load_data():
         return json.load(f)
 
 
+def _parse_month(month_str):
+    if not isinstance(month_str, str) or len(month_str) != 7 or month_str[4] != "-":
+        raise ValueError(f"Mês inválido: {month_str!r}")
+    year = int(month_str[:4])
+    month = int(month_str[5:7])
+    if month < 1 or month > 12:
+        raise ValueError(f"Mês inválido: {month_str!r}")
+    return year, month
+
+
+def _month_range(start_month, end_month):
+    start = _parse_month(start_month)
+    end = _parse_month(end_month)
+    if start > end:
+        raise ValueError(f"Janela inválida: {start_month} > {end_month}")
+    months = []
+    year, month = start
+    while (year, month) <= end:
+        months.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+    return months
+
+
+def _validate_series(name, series):
+    if not isinstance(series, dict) or not series:
+        raise ValueError(f"{name}: série ausente ou vazia")
+    months = sorted(series.keys())
+    for month in months:
+        _parse_month(month)
+        value = series[month]
+        if not isinstance(value, (int, float)) or not np.isfinite(value):
+            raise ValueError(f"{name}: valor não-finito em {month}")
+        if value <= -1:
+            raise ValueError(f"{name}: valor <= -100% em {month}")
+    expected = _month_range(months[0], months[-1])
+    if months != expected:
+        raise ValueError(f"{name}: meses faltando entre {months[0]} e {months[-1]}")
+    return months
+
+
+def validate_data(data):
+    if not isinstance(data, dict):
+        raise ValueError("Arquivo de dados inválido")
+    metadata = data.get("metadata")
+    ipca = data.get("ipca")
+    indices = data.get("indices")
+    if not isinstance(metadata, dict):
+        raise ValueError("metadata ausente")
+    if not isinstance(ipca, dict) or not ipca:
+        raise ValueError("Série IPCA ausente")
+    if not isinstance(indices, dict) or not indices:
+        raise ValueError("Nenhum índice carregado")
+    target_start = metadata.get("target_start")
+    target_end = metadata.get("target_end")
+    target_months = _month_range(target_start, target_end)
+    _validate_series("IPCA", ipca)
+    missing_ipca = [m for m in target_months if m not in ipca]
+    if missing_ipca:
+        raise ValueError(
+            f"IPCA incompleto na janela-alvo: {missing_ipca[0]} ... {missing_ipca[-1]}"
+        )
+    for cat, fallback in CATEGORY_FALLBACKS.items():
+        if fallback not in indices:
+            raise ValueError(f"Fallback ausente para {cat}: {fallback}")
+    for key, info in indices.items():
+        if not isinstance(info, dict):
+            raise ValueError(f"Índice inválido: {key}")
+        for field in ("name", "desc", "category", "returns", "start_date", "end_date", "months_available"):
+            if field not in info:
+                raise ValueError(f"{key}: campo ausente {field}")
+        if info["category"] not in CATEGORIES:
+            raise ValueError(f"{key}: categoria desconhecida {info['category']}")
+        months = _validate_series(f"Índice {key}", info["returns"])
+        if info["months_available"] != len(months):
+            raise ValueError(
+                f"{key}: months_available={info['months_available']} != {len(months)}"
+            )
+        if info["start_date"] != months[0] or info["end_date"] != months[-1]:
+            raise ValueError(
+                f"{key}: start/end inconsistentes ({info['start_date']} a {info['end_date']})"
+            )
+
+
 def get_available_indices(data):
     target_start = data["metadata"]["target_start"]
     target_end = data["metadata"]["target_end"]
@@ -181,7 +267,8 @@ def build_portfolio_returns(data, allocations):
 
 
 def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
-                    n_trajectories=10000, withdrawal_annual=0.0, seed=None):
+                    n_trajectories=10000, withdrawal_annual=0.0, seed=None,
+                    benchmark_returns=None, benchmark_name=None):
     """
     Run Monte Carlo simulation using bootstrap resampling.
 
@@ -191,6 +278,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     if n_years <= 0:
         raise ValueError("Horizonte deve ser > 0")
 
+    portfolio_returns = np.asarray(portfolio_returns, dtype=float)
+    ipca = np.asarray(ipca, dtype=float)
+
     rng = np.random.default_rng(seed)
 
     n_months = n_years * 12
@@ -198,35 +288,47 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     has_withdrawals = withdrawal_annual > 0
     monthly_withdrawal_real = withdrawal_annual / 12.0
 
+    if benchmark_returns is not None:
+        benchmark_returns = np.asarray(benchmark_returns, dtype=float)
+
     # Bootstrap: sample month indices with replacement
     sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
     sampled_returns = portfolio_returns[sampled_idx]
     sampled_ipca = ipca[sampled_idx]
+    sampled_benchmark = benchmark_returns[sampled_idx] if benchmark_returns is not None else None
 
-    # Nominal trajectories
-    traj_nominal = np.full((n_trajectories, n_months + 1), initial_value, dtype=float)
+    # Compute cumulative inflation once (shared by portfolio and benchmark)
     cum_inflation = np.ones((n_trajectories, n_months + 1), dtype=float)
-
     for t in range(n_months):
-        # Apply return first
-        traj_nominal[:, t + 1] = traj_nominal[:, t] * (1 + sampled_returns[:, t])
         cum_inflation[:, t + 1] = cum_inflation[:, t] * (1 + sampled_ipca[:, t])
 
-        # Monthly withdrawal adjusted for cumulative inflation
-        if has_withdrawals:
-            withdrawal = monthly_withdrawal_real * cum_inflation[:, t + 1]
-            traj_nominal[:, t + 1] = np.maximum(traj_nominal[:, t + 1] - withdrawal, 0.0)
+    def simulate_nominal_paths(sampled_rets):
+        traj = np.full((n_trajectories, n_months + 1), initial_value, dtype=float)
+        for t in range(n_months):
+            traj[:, t + 1] = traj[:, t] * (1 + sampled_rets[:, t])
+            if has_withdrawals:
+                withdrawal = monthly_withdrawal_real * cum_inflation[:, t + 1]
+                traj[:, t + 1] = np.maximum(traj[:, t + 1] - withdrawal, 0.0)
+        return traj
 
-    # Real (inflation-adjusted) trajectories
-    # Use explicit copy to prevent numpy in-place optimization on some platforms
+    # Portfolio trajectories
+    traj_nominal = simulate_nominal_paths(sampled_returns)
     traj_real = traj_nominal.copy()
     np.true_divide(traj_nominal, cum_inflation, out=traj_real)
+
+    # Benchmark trajectories (same sampled months)
+    benchmark_nominal = None
+    benchmark_real = None
+    if sampled_benchmark is not None:
+        benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
+        benchmark_real = benchmark_nominal.copy()
+        np.true_divide(benchmark_nominal, cum_inflation, out=benchmark_real)
 
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]
     time_years = np.arange(n_months + 1) / 12.0
 
-    def compute_stats(trajectories):
+    def compute_stats(trajectories, bench_trajectories=None):
         final = trajectories[:, -1]
         pct_values = np.percentile(trajectories, percentiles, axis=0)
         pct_lines = {p: pct_values[i].tolist() for i, p in enumerate(percentiles)}
@@ -258,9 +360,10 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             "final_p25": float(np.percentile(final, 25)),
             "final_p75": float(np.percentile(final, 75)),
             "final_p95": float(np.percentile(final, 95)),
-            "sample_trajectories": trajectories[:8, :].tolist(),
+            "sample_trajectories": trajectories[:15, :].tolist(),
             "has_withdrawals": has_withdrawals,
             "histogram": {"counts": hist_counts.tolist(), "mids": hist_mids},
+            "min_path_value": float(np.min(trajectories)),
         }
 
         # Drawdown metrics
@@ -270,6 +373,15 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         max_dd = drawdowns.min(axis=1)
         stats["median_max_drawdown"] = float(np.median(max_dd))
         stats["p10_max_drawdown"] = float(np.percentile(max_dd, 10))
+
+        # Benchmark comparison (path-matched)
+        if bench_trajectories is not None:
+            bench_final = bench_trajectories[:, -1]
+            stats["prob_beat_benchmark"] = float(np.mean(final > bench_final) * 100)
+            stats["benchmark_final_median"] = float(np.median(bench_final))
+        else:
+            stats["prob_beat_benchmark"] = None
+            stats["benchmark_final_median"] = None
 
         if has_withdrawals:
             stats["prob_ruin"] = float(np.mean(final <= 0) * 100)
@@ -291,8 +403,8 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
         return stats
 
-    nominal_stats = compute_stats(traj_nominal)
-    real_stats = compute_stats(traj_real)
+    nominal_stats = compute_stats(traj_nominal, benchmark_nominal)
+    real_stats = compute_stats(traj_real, benchmark_real)
 
     return {
         "params": {
@@ -301,6 +413,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             "n_trajectories": n_trajectories,
             "withdrawal_annual": withdrawal_annual,
             "n_historical_months": n_hist,
+            "benchmark_name": benchmark_name,
         },
         "nominal": nominal_stats,
         "real": real_stats,

@@ -266,6 +266,25 @@
             border-bottom-color: var(--accent);
         }
         .chart-tab:hover { color: var(--text-primary); }
+        .chart-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+        .chart-scale-toggle {
+            padding: 8px 12px;
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .chart-scale-toggle:hover { border-color: var(--accent); color: var(--accent); }
+        .chart-scale-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
 
         /* Warnings */
         .warnings {
@@ -411,7 +430,7 @@
                         </div>
                         <div class="param-group" id="withdrawalPercentGroup" style="display:none;">
                             <label>Taxa SWR (% a.a.)</label>
-                            <input type="number" id="withdrawalPercent" value="0" min="0" max="20" step="0.1">
+                            <input type="number" id="withdrawalPercent" value="0" min="0" max="100" step="0.1">
                         </div>
                         <div class="param-group">
                             <label>Trajetórias</label>
@@ -451,9 +470,12 @@
                         <div class="stats-grid" id="statsGrid"></div>
 
                         <!-- Chart Tabs -->
-                        <div class="chart-tabs">
-                            <button class="chart-tab active" onclick="switchView('nominal')" id="tabNominal">Nominal</button>
-                            <button class="chart-tab" onclick="switchView('real')" id="tabReal">Real (IPCA)</button>
+                        <div class="chart-toolbar">
+                            <div class="chart-tabs">
+                                <button class="chart-tab active" onclick="switchView('nominal')" id="tabNominal">Nominal</button>
+                                <button class="chart-tab" onclick="switchView('real')" id="tabReal">Real (IPCA)</button>
+                            </div>
+                            <button type="button" class="chart-scale-toggle" id="scaleToggle" onclick="toggleChartScale()">Escala log</button>
                         </div>
 
                         <!-- Chart -->
@@ -493,7 +515,9 @@
         let METADATA = {};
         let RESULTS = null;
         let CURRENT_VIEW = 'nominal';
+        let CURRENT_Y_SCALE = 'linear';
         let RUNNING = false;
+        let ALLOCATION_TOLERANCE_PCT = 0.6;
 
         // Presets
         const PRESETS = {
@@ -521,6 +545,7 @@
                 const data = await res.json();
                 INDICES = data.indices;
                 METADATA = data.metadata || {};
+                ALLOCATION_TOLERANCE_PCT = Number(METADATA.allocation_tolerance_pct) || 0.6;
                 renderAllocationForm();
                 loadState();
                 updateMethodology();
@@ -572,28 +597,33 @@
             updateTotal();
         }
 
+        function isAllocationTotalValid(totalPct) {
+            return Number.isFinite(totalPct) && Math.abs(totalPct - 100) <= ALLOCATION_TOLERANCE_PCT;
+        }
+
         function updateTotal() {
             const inputs = document.querySelectorAll('.alloc-input');
             let total = 0;
             let hasInvalid = false;
             inputs.forEach(inp => {
-                const v = parseFloat(inp.value) || 0;
+                const v = parseFloat(inp.value);
+                if (!Number.isFinite(v)) return;
                 if (v < 0 || v > 100) hasInvalid = true;
                 total += v;
             });
             const el = document.getElementById('totalAlloc');
             const remaining = 100 - total;
-            const valid = !hasInvalid && Math.abs(remaining) < 0.5;
+            const valid = !hasInvalid && isAllocationTotalValid(total);
             if (hasInvalid) {
                 el.textContent = 'Valor inválido';
-            } else if (total === 100) {
-                el.textContent = '100%';
+            } else if (Math.abs(remaining) < 0.05) {
+                el.textContent = '100,0%';
             } else if (valid) {
-                el.textContent = total.toFixed(1) + '% ≈ 100%';
+                el.textContent = total.toFixed(1).replace('.', ',') + '% \u2248 100%';
             } else if (remaining > 0) {
-                el.textContent = total.toFixed(0) + '% (faltam ' + remaining.toFixed(0) + '%)';
+                el.textContent = total.toFixed(1).replace('.', ',') + '% (faltam ' + remaining.toFixed(1).replace('.', ',') + '%)';
             } else {
-                el.textContent = total.toFixed(0) + '% (excede ' + Math.abs(remaining).toFixed(0) + '%)';
+                el.textContent = total.toFixed(1).replace('.', ',') + '% (excede ' + Math.abs(remaining).toFixed(1).replace('.', ',') + '%)';
             }
             el.className = 'total-value ' + (valid ? 'ok' : 'err');
             document.getElementById('runBtn').disabled = RUNNING || !valid;
@@ -609,13 +639,23 @@
         }
 
         function normalizeAllocations() {
-            const inputs = document.querySelectorAll('.alloc-input');
-            let total = 0;
-            inputs.forEach(inp => { total += parseFloat(inp.value) || 0; });
+            const inputs = [...document.querySelectorAll('.alloc-input')];
+            const raw = inputs.map(inp => Math.max(0, parseFloat(inp.value) || 0));
+            const total = raw.reduce((a, b) => a + b, 0);
             if (total <= 0) return;
-            inputs.forEach(inp => {
-                const v = parseFloat(inp.value) || 0;
-                inp.value = Math.round(v / total * 1000) / 10;
+            // Scale to tenths of percent and distribute remainder by largest fraction
+            const scaled = raw.map(v => (v / total) * 1000);
+            const base = scaled.map(v => Math.floor(v));
+            let remainder = 1000 - base.reduce((a, b) => a + b, 0);
+            const order = scaled
+                .map((v, idx) => ({ idx, frac: v - base[idx] }))
+                .sort((a, b) => b.frac - a.frac);
+            for (let i = 0; i < remainder; i++) {
+                base[order[i % order.length].idx] += 1;
+            }
+            inputs.forEach((inp, idx) => {
+                const pct = base[idx] / 10;
+                inp.value = Number.isInteger(pct) ? String(pct) : pct.toFixed(1);
             });
             updateTotal();
         }
@@ -697,9 +737,9 @@
                 if (val > 0) allocations[inp.dataset.key] = val / 100;
             });
 
-            const total = Object.values(allocations).reduce((a, b) => a + b, 0);
-            if (Math.abs(total - 1.0) > 0.01) {
-                errEl.textContent = 'A alocação total deve ser 100%.';
+            const totalPct = Object.values(allocations).reduce((a, b) => a + b, 0) * 100;
+            if (!isAllocationTotalValid(totalPct)) {
+                errEl.textContent = 'A alocação total deve ser 100% (±' + ALLOCATION_TOLERANCE_PCT.toFixed(1).replace('.', ',') + '%).';
                 errEl.style.display = 'block';
                 return;
             }
@@ -746,10 +786,20 @@
             btn.innerHTML = '<span class="spinner"></span>Simulando...';
             setFormDisabled(true);
 
-            // Hide previous results while new simulation runs
-            document.getElementById('resultsContent').style.display = 'none';
-            document.getElementById('placeholder').style.display = 'flex';
-            document.getElementById('placeholder').textContent = 'Simulando...';
+            const resultsContent = document.getElementById('resultsContent');
+            const placeholder = document.getElementById('placeholder');
+            const hadResults = Boolean(RESULTS);
+
+            if (!hadResults) {
+                resultsContent.style.display = 'none';
+                placeholder.style.display = 'flex';
+                placeholder.textContent = 'Simulando...';
+            } else {
+                placeholder.style.display = 'none';
+                resultsContent.style.display = 'block';
+                resultsContent.style.opacity = '0.55';
+                resultsContent.style.pointerEvents = 'none';
+            }
 
             saveState();
 
@@ -765,18 +815,22 @@
                     try { const d = await res.json(); msg = d.error || msg; } catch {}
                     errEl.textContent = msg;
                     errEl.style.display = 'block';
-                    RESULTS = null;
-                    document.getElementById('placeholder').innerHTML =
-                        'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
+                    if (!hadResults) {
+                        placeholder.innerHTML = 'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
+                        placeholder.style.display = 'flex';
+                        resultsContent.style.display = 'none';
+                    }
                     return;
                 }
                 const data = await res.json();
                 if (data.error) {
                     errEl.textContent = data.error;
                     errEl.style.display = 'block';
-                    RESULTS = null;
-                    document.getElementById('placeholder').innerHTML =
-                        'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
+                    if (!hadResults) {
+                        placeholder.innerHTML = 'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
+                        placeholder.style.display = 'flex';
+                        resultsContent.style.display = 'none';
+                    }
                     return;
                 }
                 RESULTS = data;
@@ -784,14 +838,18 @@
             } catch (e) {
                 errEl.textContent = 'Erro na simulação: ' + e.message;
                 errEl.style.display = 'block';
-                RESULTS = null;
-                document.getElementById('placeholder').innerHTML =
-                    'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
+                if (!hadResults) {
+                    placeholder.innerHTML = 'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
+                    placeholder.style.display = 'flex';
+                    resultsContent.style.display = 'none';
+                }
             } finally {
                 RUNNING = false;
                 btn.disabled = false;
                 btn.innerHTML = 'Executar Simulação';
                 setFormDisabled(false);
+                resultsContent.style.opacity = '1';
+                resultsContent.style.pointerEvents = '';
                 updateTotal();
             }
         }
@@ -827,9 +885,31 @@
 
             const stats = RESULTS[view];
             const params = RESULTS.params;
+            updateScaleToggle(stats);
             renderStats(stats, params);
             renderChart(stats, params, view);
             renderHistogram(stats, params, view);
+        }
+
+        function updateScaleToggle(stats) {
+            const btn = document.getElementById('scaleToggle');
+            const canLog = stats && stats.min_path_value > 0;
+            if (!canLog && CURRENT_Y_SCALE === 'log') CURRENT_Y_SCALE = 'linear';
+            btn.disabled = !canLog;
+            btn.textContent = CURRENT_Y_SCALE === 'log' ? 'Escala linear' : 'Escala log';
+        }
+
+        function toggleChartScale() {
+            if (!RESULTS) return;
+            const stats = RESULTS[CURRENT_VIEW];
+            if (!stats || stats.min_path_value <= 0) return;
+            CURRENT_Y_SCALE = CURRENT_Y_SCALE === 'linear' ? 'log' : 'linear';
+            switchView(CURRENT_VIEW);
+        }
+
+        function fmtPct(v, digits) {
+            if (!Number.isFinite(v)) return '\u2014';
+            return (v * 100).toFixed(digits || 1).replace('.', ',') + '%';
         }
 
         const _brlFull = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
@@ -869,6 +949,14 @@
                 items.push({ label: 'P(Perda)', value: (stats.prob_loss || 0).toFixed(1) + '%', cls: (stats.prob_loss || 0) > 30 ? 'negative' : '' });
             }
 
+            if (stats.prob_beat_benchmark != null && params.benchmark_name) {
+                items.push({
+                    label: 'P(Superar ' + params.benchmark_name + ')',
+                    value: stats.prob_beat_benchmark.toFixed(1).replace('.', ',') + '%',
+                    cls: stats.prob_beat_benchmark >= 50 ? 'positive' : 'negative',
+                });
+            }
+
             const ref = isWithdrawal ? 0 : params.initial_value;
             items.push(
                 { label: 'Percentil 5', value: fmtBRL(stats.final_p5), cls: stats.final_p5 >= ref ? 'positive' : 'negative' },
@@ -889,14 +977,8 @@
 
         function renderChart(stats, params, view) {
             const t = stats.time_years;
-            const colors = {
-                95: 'rgba(52, 211, 153, 0.12)',
-                75: 'rgba(52, 211, 153, 0.2)',
-                50: '#22d3ee',
-                25: 'rgba(248, 113, 113, 0.2)',
-                5: 'rgba(248, 113, 113, 0.12)',
-            };
-
+            const lastX = t[t.length - 1];
+            const isLog = CURRENT_Y_SCALE === 'log' && stats.min_path_value > 0;
             const traces = [];
 
             // Sample trajectories
@@ -904,7 +986,7 @@
             for (const s of samples) {
                 traces.push({
                     x: t, y: s, mode: 'lines',
-                    line: { color: 'rgba(100, 116, 139, 0.15)', width: 0.8 },
+                    line: { color: 'rgba(100, 116, 139, 0.12)', width: 0.8 },
                     showlegend: false, hoverinfo: 'skip',
                 });
             }
@@ -915,7 +997,6 @@
             const p25 = stats.percentiles['25'];
             const p5 = stats.percentiles['5'];
 
-            // 5-95 band
             traces.push({
                 x: t.concat([...t].reverse()),
                 y: p95.concat([...p5].reverse()),
@@ -923,7 +1004,6 @@
                 line: { color: 'transparent' },
                 showlegend: false, hoverinfo: 'skip', name: 'P5-P95',
             });
-            // 25-75 band
             traces.push({
                 x: t.concat([...t].reverse()),
                 y: p75.concat([...p25].reverse()),
@@ -932,7 +1012,7 @@
                 showlegend: false, hoverinfo: 'skip', name: 'P25-P75',
             });
 
-            // Percentile lines
+            // Percentile lines with end labels
             const pctConfigs = [
                 { p: '5', color: '#f87171', dash: 'dot', width: 1.2, name: 'P5' },
                 { p: '25', color: '#fb923c', dash: 'dash', width: 1.2, name: 'P25' },
@@ -940,40 +1020,57 @@
                 { p: '75', color: '#34d399', dash: 'dash', width: 1.2, name: 'P75' },
                 { p: '95', color: '#34d399', dash: 'dot', width: 1.2, name: 'P95' },
             ];
+
+            const endAnnotations = [];
             for (const c of pctConfigs) {
+                const yValues = stats.percentiles[c.p];
+                const finalVal = yValues[yValues.length - 1];
                 traces.push({
-                    x: t, y: stats.percentiles[c.p],
+                    x: t, y: yValues,
                     mode: 'lines',
                     line: { color: c.color, dash: c.dash, width: c.width },
                     name: c.name,
-                    hovertemplate: c.name + ': R$ %{y:,.0f}<extra></extra>',
+                    customdata: yValues.map(v => [fmtBRLFull(v), fmtPct(v / params.initial_value - 1)]),
+                    hovertemplate: '<b>' + c.name + '</b><br>Ano %{x:.1f}<br>Valor: %{customdata[0]}<br>vs. inicial: %{customdata[1]}<extra></extra>',
+                });
+                endAnnotations.push({
+                    x: lastX, y: finalVal, xref: 'x', yref: 'y',
+                    text: c.name + ' ' + fmtBRL(finalVal),
+                    showarrow: false, xanchor: 'left', xshift: 8,
+                    font: { size: 11, color: c.color },
+                    bgcolor: 'rgba(15,23,42,0.75)',
+                    bordercolor: 'rgba(100,116,139,0.15)', borderpad: 2,
                 });
             }
 
             // Starting value line
             traces.push({
-                x: [0, t[t.length - 1]], y: [params.initial_value, params.initial_value],
+                x: [0, lastX], y: [params.initial_value, params.initial_value],
                 mode: 'lines',
                 line: { color: 'rgba(148, 163, 184, 0.4)', dash: 'dot', width: 1 },
                 name: 'Valor Inicial',
                 hoverinfo: 'skip',
             });
 
+            const yearTicks = Array.from({ length: Math.floor(params.n_years) + 1 }, (_, i) => i);
             const title = view === 'nominal'
                 ? 'Simulação Monte Carlo — Valores Nominais (BRL)'
                 : 'Simulação Monte Carlo — Valores Reais (ajustados pelo IPCA)';
 
-            Plotly.newPlot('chart', traces, {
+            Plotly.react('chart', traces, {
                 title: { text: title, font: { size: 15, color: '#e2e8f0' }, x: 0.02 },
                 xaxis: {
                     title: 'Anos', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)',
                     zerolinecolor: 'rgba(100,116,139,0.15)',
+                    tickmode: 'array', tickvals: yearTicks, ticktext: yearTicks.map(String),
+                    range: [0, lastX],
                 },
                 yaxis: {
                     title: 'Valor do Portfólio (R$)', color: '#94a3b8',
                     gridcolor: 'rgba(100,116,139,0.15)',
                     zerolinecolor: 'rgba(100,116,139,0.15)',
                     tickformat: ',.0f',
+                    type: isLog ? 'log' : 'linear',
                 },
                 paper_bgcolor: 'transparent',
                 plot_bgcolor: 'transparent',
@@ -983,8 +1080,9 @@
                     bordercolor: 'rgba(100,116,139,0.2)', borderwidth: 1,
                     font: { size: 11 },
                 },
-                margin: { t: 50, r: 20, b: 50, l: 80 },
+                margin: { t: 50, r: 120, b: 50, l: 80 },
                 hovermode: 'x unified',
+                annotations: endAnnotations,
             }, { responsive: true, displayModeBar: false });
         }
 
@@ -992,15 +1090,20 @@
             const hist = stats.histogram;
             const mids = hist.mids;
             const counts = hist.counts;
+            const totalCount = counts.reduce((a, b) => a + b, 0) || 1;
 
-            // Color bars: in withdrawal mode, benchmark against 0; in accumulation, against initial
             const ref = stats.has_withdrawals ? 0 : params.initial_value;
             const barColors = mids.map(m =>
                 m >= ref ? 'rgba(52, 211, 153, 0.7)' : 'rgba(248, 113, 113, 0.7)'
             );
 
-            // Compute bin width for proper bar display
             const binWidth = mids.length > 1 ? mids[1] - mids[0] : 1;
+            const customdata = mids.map((m, idx) => {
+                const lo = mids.length > 1 ? m - binWidth / 2 : m;
+                const hi = mids.length > 1 ? m + binWidth / 2 : m;
+                const share = (counts[idx] / totalCount * 100).toFixed(1).replace('.', ',') + '%';
+                return [fmtBRLFull(lo), fmtBRLFull(hi), share];
+            });
 
             const trace = {
                 x: mids,
@@ -1008,10 +1111,12 @@
                 type: 'bar',
                 marker: { color: barColors },
                 width: binWidth * 0.9,
-                hovertemplate: 'R$ %{x:,.0f}<br>%{y} trajetórias<extra></extra>',
+                customdata: customdata,
+                hovertemplate: mids.length > 1
+                    ? 'Faixa: %{customdata[0]} \u2013 %{customdata[1]}<br>%{y} trajetórias (%{customdata[2]})<extra></extra>'
+                    : 'Valor: %{customdata[0]}<br>%{y} trajetórias (%{customdata[2]})<extra></extra>',
             };
 
-            // Vertical line for median
             const maxCount = Math.max(...counts);
             const shapes = [{
                 type: 'line', x0: stats.final_median, x1: stats.final_median,
@@ -1024,7 +1129,6 @@
                 showarrow: false, font: { size: 11, color: '#22d3ee' }, yshift: 10,
             }];
 
-            // In accumulation mode, add initial value reference line
             if (!stats.has_withdrawals) {
                 shapes.push({
                     type: 'line', x0: params.initial_value, x1: params.initial_value,
@@ -1038,12 +1142,25 @@
                 });
             }
 
-            // Ensure x-axis range includes reference points, clamped to >= 0
+            // Benchmark median line on histogram
+            if (stats.benchmark_final_median != null && params.benchmark_name) {
+                shapes.push({
+                    type: 'line', x0: stats.benchmark_final_median, x1: stats.benchmark_final_median,
+                    y0: 0, y1: maxCount * 1.05,
+                    line: { color: '#34d399', dash: 'dot', width: 1.5 },
+                });
+                annotations.push({
+                    x: stats.benchmark_final_median, y: maxCount * 0.82,
+                    text: params.benchmark_name + ': ' + fmtBRL(stats.benchmark_final_median),
+                    showarrow: false, font: { size: 10, color: '#34d399' }, yshift: 10,
+                });
+            }
+
             const refVal = stats.has_withdrawals ? 0 : params.initial_value;
             const xMin = Math.max(0, Math.min(mids[0] - binWidth, refVal, stats.final_median));
             const xMax = Math.max(mids[mids.length - 1] + binWidth, refVal, stats.final_median);
 
-            Plotly.newPlot('histChart', [trace], {
+            Plotly.react('histChart', [trace], {
                 title: {
                     text: view === 'nominal' ? 'Distribuição do Valor Final (Nominal)' : 'Distribuição do Valor Final (Real)',
                     font: { size: 14, color: '#e2e8f0' }, x: 0.02,
