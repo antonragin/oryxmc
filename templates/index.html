@@ -537,8 +537,10 @@
             const valid = !hasInvalid && Math.abs(remaining) < 0.5;
             if (hasInvalid) {
                 el.textContent = 'Valor inválido';
-            } else if (valid) {
+            } else if (total === 100) {
                 el.textContent = '100%';
+            } else if (valid) {
+                el.textContent = total.toFixed(1) + '% ≈ 100%';
             } else {
                 el.textContent = total.toFixed(0) + '% (faltam ' + remaining.toFixed(0) + '%)';
             }
@@ -553,6 +555,15 @@
                 inp.value = preset[key] || 0;
             });
             updateTotal();
+        }
+
+        function setFormDisabled(disabled) {
+            document.querySelectorAll('.alloc-input').forEach(inp => inp.disabled = disabled);
+            document.querySelectorAll('.preset-btn').forEach(btn => btn.disabled = disabled);
+            document.getElementById('initialValue').disabled = disabled;
+            document.getElementById('nYears').disabled = disabled;
+            document.getElementById('withdrawal').disabled = disabled;
+            document.getElementById('nTraj').disabled = disabled;
         }
 
         async function runSimulation() {
@@ -588,6 +599,12 @@
             RUNNING = true;
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span>Simulando...';
+            setFormDisabled(true);
+
+            // Hide previous results while new simulation runs
+            document.getElementById('resultsContent').style.display = 'none';
+            document.getElementById('placeholder').style.display = 'flex';
+            document.getElementById('placeholder').textContent = 'Simulando...';
 
             try {
                 const res = await fetch('/api/simulate', {
@@ -607,12 +624,18 @@
                     try { const d = await res.json(); msg = d.error || msg; } catch {}
                     errEl.textContent = msg;
                     errEl.style.display = 'block';
+                    RESULTS = null;
+                    document.getElementById('placeholder').innerHTML =
+                        'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
                     return;
                 }
                 const data = await res.json();
                 if (data.error) {
                     errEl.textContent = data.error;
                     errEl.style.display = 'block';
+                    RESULTS = null;
+                    document.getElementById('placeholder').innerHTML =
+                        'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
                     return;
                 }
                 RESULTS = data;
@@ -620,10 +643,14 @@
             } catch (e) {
                 errEl.textContent = 'Erro na simulação: ' + e.message;
                 errEl.style.display = 'block';
+                RESULTS = null;
+                document.getElementById('placeholder').innerHTML =
+                    'Configure a alocação do portfólio no painel esquerdo<br>e clique em "Executar Simulação"';
             } finally {
                 RUNNING = false;
                 btn.disabled = false;
                 btn.innerHTML = 'Executar Simulação';
+                setFormDisabled(false);
                 updateTotal();
             }
         }
@@ -846,6 +873,10 @@
                 font: { size: 10, color: '#94a3b8' }, yshift: 10,
             }];
 
+            // Ensure x-axis range includes initial value and median
+            const xMin = Math.min(mids[0] - binWidth, params.initial_value, stats.final_median);
+            const xMax = Math.max(mids[mids.length - 1] + binWidth, params.initial_value, stats.final_median);
+
             Plotly.newPlot('histChart', [trace], {
                 title: {
                     text: view === 'nominal' ? 'Distribuição do Valor Final (Nominal)' : 'Distribuição do Valor Final (Real)',
@@ -854,6 +885,7 @@
                 xaxis: {
                     title: 'Valor Final (R$)', color: '#94a3b8',
                     gridcolor: 'rgba(100,116,139,0.1)', tickformat: ',.0f',
+                    range: [xMin * 0.95, xMax * 1.05],
                 },
                 yaxis: {
                     title: 'Frequência', color: '#94a3b8',

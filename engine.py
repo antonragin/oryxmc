@@ -35,10 +35,14 @@ def load_data():
 
 
 def get_available_indices(data):
-    target_months = len([m for m in data["ipca"]
-                         if data["metadata"]["target_start"] <= m <= data["metadata"]["target_end"]])
+    target_start = data["metadata"]["target_start"]
+    target_end = data["metadata"]["target_end"]
+    target_months_set = {m for m in data["ipca"] if target_start <= m <= target_end}
+    target_months = len(target_months_set)
     indices = []
     for key, info in data["indices"].items():
+        # Count months this index actually has within the target window
+        months_in_window = sum(1 for m in info["returns"] if m in target_months_set)
         indices.append({
             "key": key,
             "name": info["name"],
@@ -48,7 +52,7 @@ def get_available_indices(data):
             "months_available": info["months_available"],
             "start_date": info["start_date"],
             "end_date": info["end_date"],
-            "has_full_history": info["months_available"] >= target_months,
+            "has_full_history": months_in_window >= target_months,
         })
     return indices
 

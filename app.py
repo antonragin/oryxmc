@@ -75,9 +75,21 @@ def api_simulate():
 
         try:
             initial_value = float(params.get("initial_value", 1000000))
-            n_years = int(params.get("n_years", 10))
+            n_years_raw = params.get("n_years", 10)
+            if not isinstance(n_years_raw, int) or isinstance(n_years_raw, bool):
+                n_years_f = float(n_years_raw)
+                if n_years_f != int(n_years_f):
+                    return jsonify({"error": "Horizonte deve ser um número inteiro"}), 400
+                n_years_raw = int(n_years_f)
+            n_years = n_years_raw
             withdrawal_annual = float(params.get("withdrawal_annual", 0))
-            n_trajectories = min(int(params.get("n_trajectories", 10000)), 20000)
+            n_traj_raw = params.get("n_trajectories", 10000)
+            if not isinstance(n_traj_raw, int) or isinstance(n_traj_raw, bool):
+                n_traj_f = float(n_traj_raw)
+                if n_traj_f != int(n_traj_f):
+                    return jsonify({"error": "Número de trajetórias deve ser inteiro"}), 400
+                n_traj_raw = int(n_traj_f)
+            n_trajectories = n_traj_raw
         except (TypeError, ValueError, OverflowError):
             return jsonify({"error": "Parâmetros numéricos inválidos"}), 400
 
@@ -88,8 +100,8 @@ def api_simulate():
             return jsonify({"error": "Horizonte deve ser entre 1 e 50 anos"}), 400
         if not math.isfinite(withdrawal_annual) or withdrawal_annual < 0:
             return jsonify({"error": "Retirada anual não pode ser negativa"}), 400
-        if n_trajectories <= 0:
-            return jsonify({"error": "Número de trajetórias inválido"}), 400
+        if n_trajectories <= 0 or n_trajectories > 20000:
+            return jsonify({"error": "Número de trajetórias deve ser entre 1 e 20.000"}), 400
 
         # Reject oversized requests (OOM protection)
         if n_trajectories * n_years * 12 > 4_000_000:
