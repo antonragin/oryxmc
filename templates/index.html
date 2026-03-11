@@ -532,7 +532,10 @@
                                 <button class="chart-tab active" role="tab" aria-selected="true" onclick="switchView('nominal')" id="tabNominal">Nominal</button>
                                 <button class="chart-tab" role="tab" aria-selected="false" onclick="switchView('real')" id="tabReal">Real (IPCA)</button>
                             </div>
-                            <button type="button" class="chart-scale-toggle" id="scaleToggle" onclick="toggleChartScale()">Escala log</button>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" class="chart-scale-toggle" id="scaleToggle" onclick="toggleChartScale()">Escala log</button>
+                                <button type="button" class="chart-scale-toggle" onclick="downloadCSV()">Baixar CSV</button>
+                            </div>
                         </div>
 
                         <!-- Chart -->
@@ -831,6 +834,12 @@
                     seed: document.getElementById('seed').value,
                 };
                 localStorage.setItem(STATE_KEY, JSON.stringify(state));
+                // Sync to URL hash for sharing
+                try {
+                    const params = new URLSearchParams();
+                    params.set('s', JSON.stringify(state));
+                    window.history.replaceState(null, null, '#' + params.toString());
+                } catch {}
                 refreshStaleResultsNote();
             } catch {}
         }
@@ -844,7 +853,15 @@
 
         function loadState() {
             try {
-                const raw = localStorage.getItem(STATE_KEY);
+                let raw = null;
+                // Check URL hash first (shared link), fallback to localStorage
+                if (window.location.hash) {
+                    try {
+                        const params = new URLSearchParams(window.location.hash.substring(1));
+                        raw = params.get('s');
+                    } catch {}
+                }
+                if (!raw) raw = localStorage.getItem(STATE_KEY);
                 if (!raw) return;
                 const state = JSON.parse(raw);
                 if (state.allocations) {
@@ -1089,10 +1106,10 @@
             CURRENT_VIEW = view;
             const nomTab = document.getElementById('tabNominal');
             const realTab = document.getElementById('tabReal');
-            nomTab.className = 'chart-tab' + (view === 'nominal' ? ' active' : '');
-            realTab.className = 'chart-tab' + (view === 'nominal' ? '' : ' active');
+            nomTab.classList.toggle('active', view === 'nominal');
+            realTab.classList.toggle('active', view === 'real');
             nomTab.setAttribute('aria-selected', view === 'nominal' ? 'true' : 'false');
-            realTab.setAttribute('aria-selected', view === 'nominal' ? 'false' : 'true');
+            realTab.setAttribute('aria-selected', view === 'real' ? 'true' : 'false');
             document.getElementById('statsTitle').textContent =
                 view === 'nominal' ? 'Resultados Nominais' : 'Resultados Reais (ajustados pela inflação)';
 
@@ -1118,6 +1135,28 @@
             if (!stats || stats.min_path_value <= 0) return;
             CURRENT_Y_SCALE = CURRENT_Y_SCALE === 'linear' ? 'log' : 'linear';
             switchView(CURRENT_VIEW);
+        }
+
+        function downloadCSV() {
+            if (!RESULTS) return;
+            const stats = RESULTS[CURRENT_VIEW];
+            if (!stats) return;
+            const pcts = ['5', '10', '25', '50', '75', '90', '95'];
+            let csv = 'Ano,' + pcts.map(p => 'P' + p).join(',') + '\n';
+            for (let i = 0; i < stats.time_years.length; i++) {
+                csv += stats.time_years[i].toFixed(2).replace('.', ',');
+                for (const p of pcts) {
+                    csv += ',' + stats.percentiles[p][i];
+                }
+                csv += '\n';
+            }
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'oryxmc_simulacao_' + CURRENT_VIEW + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
         }
 
         function fmtPct(v, digits) {

@@ -220,8 +220,9 @@ def build_portfolio_returns(data, allocations):
                 if available:
                     # Redistribute pro-rata among available selected indices
                     total_avail = sum(available.values())
-                    for k in list(available):
-                        available[k] += missing_weight * (available[k] / total_avail)
+                    multiplier = 1.0 + (missing_weight / total_avail)
+                    for k in available:
+                        available[k] *= multiplier
                     for mk in missing:
                         sub_log[mk]["peer_months"] += 1
                         sub_log[mk]["peers"].update(available.keys())
@@ -354,12 +355,14 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     log_ret = np.log1p(sampled_returns)    # does NOT modify sampled_returns
     log_ipca = np.log1p(sampled_ipca)      # does NOT modify sampled_ipca
     sampled_real_returns = np.expm1(log_ret - log_ipca)
+    del log_ret  # free memory — no longer needed after real returns computed
 
     # Cumulative inflation: cumprod(1+i) = exp(cumsum(log1p(i)))
     # Use a COPY of log_ipca since cumsum may mutate the input on some builds
     cum_log_ipca = np.cumsum(log_ipca.copy(), axis=1)
     cum_inflation = np.ones((n_trajectories, n_months + 1), dtype=float)
     cum_inflation[:, 1:] = np.exp(cum_log_ipca)
+    del sampled_ipca, cum_log_ipca  # free memory — no longer needed
 
     def simulate_nominal_paths(monthly_rets):
         """Build trajectory from monthly returns (not log returns)."""
@@ -394,6 +397,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         sampled_benchmark_real = np.expm1(log_bench - log_ipca)
         benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
         benchmark_real = (benchmark_nominal.copy()) / cum_inflation
+    del sampled_idx, log_ipca  # free memory — no longer needed after benchmark
 
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]

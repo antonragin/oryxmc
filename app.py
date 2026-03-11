@@ -6,6 +6,7 @@ import secrets
 from urllib.parse import urlsplit
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.middleware.proxy_fix import ProxyFix
 from functools import wraps
 import engine
 
@@ -70,6 +71,8 @@ def _parse_int(params, name, default=None):
 
 
 app = Flask(__name__)
+# Trust X-Forwarded-For and X-Forwarded-Proto from Render's reverse proxy
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 _secret = os.environ.get("SECRET_KEY")
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
 if IS_PROD and not _secret:
@@ -138,8 +141,16 @@ def add_security_headers(response):
 def check_origin():
     """Reject cross-origin state-changing requests (CSRF defense-in-depth)."""
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        # Enforce JSON content type on API routes (immune to <form> CSRF)
+        if request.path.startswith("/api/") and not request.is_json:
+            return jsonify({"error": "Content-Type deve ser application/json"}), 415
+
         origin = request.headers.get("Origin")
-        if origin:
+        if not origin:
+            # Fail closed if Origin is omitted on API routes
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Origem ausente"}), 403
+        else:
             try:
                 origin_host = urlsplit(origin).netloc
             except ValueError:
