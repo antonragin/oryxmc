@@ -9,14 +9,57 @@ from functools import wraps
 import engine
 
 ALLOCATION_TOLERANCE = 0.006  # ±0.6% — shared across frontend and backend
-MAX_SIM_BYTES = 120_000_000  # OOM protection for 512MB / 2-worker deploy
+MAX_SIM_BYTES = 160_000_000  # OOM protection for 512MB / 2-worker deploy
+SIM_YEARS = (5, 10, 15, 20, 25, 30, 40, 50)
+SIM_TRAJECTORIES = (1000, 5000, 10000, 20000)
 
 
 def _estimate_sim_bytes(n_years, n_trajectories):
+    """Conservative upper bound for peak memory of run_monte_carlo()."""
     n_months = n_years * 12
-    return n_trajectories * n_months * 72 + n_trajectories * (n_months + 1) * 24
+    month_cells = n_trajectories * n_months
+    path_cells = n_trajectories * (n_months + 1)
+    # Peak array count: 9 month-sized (sampled_idx as int64, sampled_returns,
+    # sampled_ipca, log_ret, log_ipca, sampled_real_returns, cum_log_ipca,
+    # sampled_benchmark, sampled_benchmark_real) + 5 path-sized (cum_inflation,
+    # traj_nominal, traj_real, benchmark_nominal, benchmark_real).
+    # compute_stats nav_paths/peaks are temporary within each call.
+    return (9 * month_cells + 5 * path_cells) * 8
 
 IS_PROD = bool(os.environ.get("RENDER") or os.environ.get("FLASK_ENV") == "production")
+
+# Precompute valid year/trajectory combinations once
+ALLOWED_RUNS = {
+    y: sorted(t for t in SIM_TRAJECTORIES if _estimate_sim_bytes(y, t) <= MAX_SIM_BYTES)
+    for y in SIM_YEARS
+}
+
+
+def _parse_float(params, name, default=None, allow_zero=True):
+    """Parse a float field from request params, rejecting bools and non-finites."""
+    raw = params.get(name, default)
+    if isinstance(raw, bool):
+        raise ValueError(f"{name} inválido")
+    val = float(raw)
+    if not math.isfinite(val):
+        raise ValueError(f"{name} inválido")
+    if not allow_zero and val <= 0:
+        raise ValueError(f"{name} deve ser > 0")
+    return val
+
+
+def _parse_int(params, name, default=None):
+    """Parse an integer field from request params, accepting int-like floats."""
+    raw = params.get(name, default)
+    if isinstance(raw, bool):
+        raise ValueError(f"{name} inválido")
+    if isinstance(raw, int):
+        return raw
+    val = float(raw)
+    if val != int(val):
+        raise ValueError(f"{name} deve ser inteiro")
+    return int(val)
+
 
 app = Flask(__name__)
 _secret = os.environ.get("SECRET_KEY")
@@ -119,11 +162,8 @@ def api_indices():
             "n_months": len([m for m in DATA["ipca"]
                             if DATA["metadata"]["target_start"] <= m <= DATA["metadata"]["target_end"]]),
             "allocation_tolerance_pct": ALLOCATION_TOLERANCE * 100,
-            "allowed_runs": {
-                str(y): [t for t in (1000, 5000, 10000, 20000)
-                         if _estimate_sim_bytes(y, t) <= MAX_SIM_BYTES]
-                for y in (5, 10, 15, 20, 25, 30, 40, 50)
-            },
+            "allowed_runs": {str(y): v for y, v in ALLOWED_RUNS.items()},
+            "year_options": sorted(y for y, runs in ALLOWED_RUNS.items() if runs),
         },
     })
 
@@ -141,61 +181,42 @@ def api_simulate():
             return jsonify({"error": "allocations inválido"}), 400
 
         try:
-            iv_raw = params.get("initial_value", 1000000)
-            if isinstance(iv_raw, bool):
-                return jsonify({"error": "Valor inicial inválido"}), 400
-            initial_value = float(iv_raw)
-            n_years_raw = params.get("n_years", 10)
-            if not isinstance(n_years_raw, int) or isinstance(n_years_raw, bool):
-                n_years_f = float(n_years_raw)
-                if n_years_f != int(n_years_f):
-                    return jsonify({"error": "Horizonte deve ser um número inteiro"}), 400
-                n_years_raw = int(n_years_f)
-            n_years = n_years_raw
-            wa_raw = params.get("withdrawal_annual", 0)
-            if isinstance(wa_raw, bool):
-                return jsonify({"error": "Retirada anual inválida"}), 400
-            withdrawal_annual = float(wa_raw)
-            n_traj_raw = params.get("n_trajectories", 10000)
-            if not isinstance(n_traj_raw, int) or isinstance(n_traj_raw, bool):
-                n_traj_f = float(n_traj_raw)
-                if n_traj_f != int(n_traj_f):
-                    return jsonify({"error": "Número de trajetórias deve ser inteiro"}), 400
-                n_traj_raw = int(n_traj_f)
-            n_trajectories = n_traj_raw
+            initial_value = _parse_float(params, "initial_value", default=1000000)
+            n_years = _parse_int(params, "n_years", default=10)
+            withdrawal_annual = _parse_float(params, "withdrawal_annual", default=0)
+            n_trajectories = _parse_int(params, "n_trajectories", default=10000)
         except (TypeError, ValueError, OverflowError):
             return jsonify({"error": "Parâmetros numéricos inválidos"}), 400
 
-        # Validate parameters (reject NaN/Infinity)
-        if not math.isfinite(initial_value) or initial_value <= 0 or initial_value > 1e12:
+        # Validate parameters
+        if initial_value <= 0 or initial_value > 1e12:
             return jsonify({"error": "Valor inicial inválido"}), 400
         if n_years <= 0 or n_years > 50:
             return jsonify({"error": "Horizonte deve ser entre 1 e 50 anos"}), 400
+
         # Handle withdrawal mode (fixed BRL vs % of initial capital / SWR)
         withdrawal_mode = params.get("withdrawal_mode", "fixed")
         if withdrawal_mode not in ("fixed", "percent"):
             return jsonify({"error": "Modo de retirada inválido"}), 400
         if withdrawal_mode == "percent":
-            wp_raw = params.get("withdrawal_percent", 0)
-            if isinstance(wp_raw, bool):
-                return jsonify({"error": "Taxa SWR inválida"}), 400
             try:
-                withdrawal_percent = float(wp_raw)
+                withdrawal_percent = _parse_float(params, "withdrawal_percent", default=0)
             except (TypeError, ValueError, OverflowError):
                 return jsonify({"error": "Taxa SWR inválida"}), 400
-            if not math.isfinite(withdrawal_percent) or withdrawal_percent < 0 or withdrawal_percent > 100:
+            if withdrawal_percent < 0 or withdrawal_percent > 100:
                 return jsonify({"error": "Taxa SWR deve ser entre 0% e 100%"}), 400
             withdrawal_annual = initial_value * (withdrawal_percent / 100.0)
         else:
             withdrawal_percent = None
-            if not math.isfinite(withdrawal_annual) or withdrawal_annual < 0:
+            if withdrawal_annual < 0:
                 return jsonify({"error": "Retirada anual não pode ser negativa"}), 400
+
         if n_trajectories <= 0 or n_trajectories > 20000:
             return jsonify({"error": "Número de trajetórias deve ser entre 1 e 20.000"}), 400
 
-        # Reject oversized requests (OOM protection)
-        if _estimate_sim_bytes(n_years, n_trajectories) > MAX_SIM_BYTES:
-            return jsonify({"error": "Simulação muito grande para o servidor atual"}), 400
+        # Enforce allowed year/trajectory combinations (OOM protection)
+        if n_years not in ALLOWED_RUNS or n_trajectories not in ALLOWED_RUNS[n_years]:
+            return jsonify({"error": "Combinação de horizonte e trajetórias não permitida neste servidor"}), 400
 
         # Validate allocations
         clean_allocations = {}

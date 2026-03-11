@@ -453,12 +453,7 @@
                         <div class="param-group">
                             <label>Horizonte (anos)</label>
                             <select id="nYears" onchange="syncAllowedTrajectories(); saveState()">
-                                <option value="5">5 anos</option>
-                                <option value="10" selected>10 anos</option>
-                                <option value="15">15 anos</option>
-                                <option value="20">20 anos</option>
-                                <option value="25">25 anos</option>
-                                <option value="30">30 anos</option>
+                                <option value="10">10 anos</option>
                             </select>
                         </div>
                         <div class="param-group">
@@ -479,10 +474,7 @@
                         <div class="param-group">
                             <label>Trajetórias</label>
                             <select id="nTraj" onchange="saveState()">
-                                <option value="1000">1.000</option>
-                                <option value="5000">5.000</option>
-                                <option value="10000" selected>10.000</option>
-                                <option value="20000">20.000</option>
+                                <option value="10000">10.000</option>
                             </select>
                         </div>
                     </div>
@@ -594,8 +586,10 @@
                 const data = await res.json();
                 INDICES = data.indices;
                 METADATA = data.metadata || {};
-                ALLOCATION_TOLERANCE_PCT = Number(METADATA.allocation_tolerance_pct) || 0.6;
+                const tol = Number(METADATA.allocation_tolerance_pct);
+                ALLOCATION_TOLERANCE_PCT = Number.isFinite(tol) ? tol : 0.6;
                 ALLOWED_RUNS = METADATA.allowed_runs || {};
+                buildRunSelectors();
                 renderAllocationForm();
                 loadState();
                 syncAllowedTrajectories();
@@ -623,6 +617,21 @@
             }
         }
 
+        function buildRunSelectors() {
+            const yearSel = document.getElementById('nYears');
+            const trajSel = document.getElementById('nTraj');
+            const years = (METADATA.year_options || Object.keys(ALLOWED_RUNS).map(Number)).sort((a, b) => a - b);
+            yearSel.innerHTML = years.map(y =>
+                `<option value="${y}"${y === 10 ? ' selected' : ''}>${y} anos</option>`
+            ).join('');
+            const allTraj = [...new Set(
+                years.flatMap(y => (ALLOWED_RUNS[String(y)] || []).map(Number))
+            )].sort((a, b) => a - b);
+            trajSel.innerHTML = allTraj.map(t =>
+                `<option value="${t}"${t === 10000 ? ' selected' : ''}>${new Intl.NumberFormat('pt-BR').format(t)}</option>`
+            ).join('');
+        }
+
         function renderAllocationForm() {
             const form = document.getElementById('allocationForm');
             let html = '';
@@ -633,7 +642,7 @@
                 html += `<div class="category"><div class="category-label">${CATEGORY_NAMES[cat]}</div>`;
                 for (const idx of catIndices) {
                     const shortHist = !idx.has_full_history ?
-                        `<span class="short-hist" title="Disponível desde ${idx.start_date}">&#9679; desde ${idx.start_date.slice(0,4)}</span>` : '';
+                        `<span class="short-hist" title="Cobertura: ${idx.coverage_pct}% — disponível desde ${idx.start_date}">&#9679; ${idx.coverage_pct}%</span>` : '';
                     html += `
                         <div class="alloc-row">
                             <span class="alloc-name" title="${idx.desc}">${idx.name}${shortHist}</span>
@@ -737,12 +746,12 @@
             updateTotal();
         }
 
-        function updateWithdrawalUI() {
+        function updateWithdrawalUI({ persist = true } = {}) {
             const mode = document.getElementById('withdrawalMode').value;
             document.getElementById('withdrawalFixedGroup').style.display = mode === 'fixed' ? '' : 'none';
             document.getElementById('withdrawalPercentGroup').style.display = mode === 'percent' ? '' : 'none';
             updateWithdrawalHint();
-            saveState();
+            if (persist) saveState();
         }
 
         function updateInitialValueHint() {
@@ -770,6 +779,8 @@
             }
         }
 
+        const STATE_KEY = 'oryxmc_state_v2';
+
         function saveState() {
             try {
                 const allocs = {};
@@ -786,13 +797,20 @@
                     withdrawalPercent: document.getElementById('withdrawalPercent').value,
                     nTraj: document.getElementById('nTraj').value,
                 };
-                localStorage.setItem('oryxmc_state', JSON.stringify(state));
+                localStorage.setItem(STATE_KEY, JSON.stringify(state));
             } catch {}
+        }
+
+        function setSelectIfValid(id, value) {
+            const sel = document.getElementById(id);
+            if ([...sel.options].some(o => o.value === String(value))) {
+                sel.value = String(value);
+            }
         }
 
         function loadState() {
             try {
-                const raw = localStorage.getItem('oryxmc_state');
+                const raw = localStorage.getItem(STATE_KEY);
                 if (!raw) return;
                 const state = JSON.parse(raw);
                 if (state.allocations) {
@@ -800,15 +818,17 @@
                         inp.value = state.allocations[inp.dataset.key] || 0;
                     });
                 }
-                if (state.initialValue) document.getElementById('initialValue').value = state.initialValue;
-                if (state.nYears) document.getElementById('nYears').value = state.nYears;
-                if (state.withdrawal) document.getElementById('withdrawal').value = state.withdrawal;
-                if (state.withdrawalMode) document.getElementById('withdrawalMode').value = state.withdrawalMode;
-                if (state.withdrawalPercent) document.getElementById('withdrawalPercent').value = state.withdrawalPercent;
-                if (state.nTraj) document.getElementById('nTraj').value = state.nTraj;
-                updateWithdrawalUI();
+                if (state.initialValue != null) document.getElementById('initialValue').value = state.initialValue;
+                if (state.withdrawal != null) document.getElementById('withdrawal').value = state.withdrawal;
+                if (state.withdrawalPercent != null) document.getElementById('withdrawalPercent').value = state.withdrawalPercent;
+                setSelectIfValid('nYears', state.nYears);
+                setSelectIfValid('withdrawalMode', state.withdrawalMode);
+                setSelectIfValid('nTraj', state.nTraj);
+                updateWithdrawalUI({ persist: false });
+                syncAllowedTrajectories();
                 updateTotal();
                 updateInitialValueHint();
+                saveState();
             } catch {}
         }
 

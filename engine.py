@@ -65,7 +65,7 @@ def _validate_series(name, series):
     for month in months:
         _parse_month(month)
         value = series[month]
-        if not isinstance(value, (int, float)) or not np.isfinite(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
             raise ValueError(f"{name}: valor não-finito em {month}")
         if value <= -1:
             raise ValueError(f"{name}: valor <= -100% em {month}")
@@ -115,6 +115,10 @@ def validate_data(data):
         for field in ("name", "desc", "category", "returns", "start_date", "end_date", "months_available"):
             if field not in info:
                 raise ValueError(f"{key}: campo ausente {field}")
+        if not isinstance(info["name"], str) or not info["name"].strip():
+            raise ValueError(f"{key}: name inválido")
+        if isinstance(info["months_available"], bool) or not isinstance(info["months_available"], int):
+            raise ValueError(f"{key}: months_available inválido")
         if info["category"] not in CATEGORIES:
             raise ValueError(f"{key}: categoria desconhecida {info['category']}")
         months = _validate_series(f"Índice {key}", info["returns"])
@@ -137,6 +141,7 @@ def get_available_indices(data):
     for key, info in data["indices"].items():
         # Count months this index actually has within the target window
         months_in_window = sum(1 for m in info["returns"] if m in target_months_set)
+        missing_in_window = target_months - months_in_window
         indices.append({
             "key": key,
             "name": info["name"],
@@ -144,6 +149,9 @@ def get_available_indices(data):
             "category": info["category"],
             "category_name": CATEGORIES.get(info["category"], info["category"]),
             "months_available": info["months_available"],
+            "months_in_window": months_in_window,
+            "missing_months_in_window": missing_in_window,
+            "coverage_pct": round(months_in_window / target_months * 100, 1) if target_months > 0 else 100.0,
             "start_date": info["start_date"],
             "end_date": info["end_date"],
             "has_full_history": months_in_window >= target_months,
