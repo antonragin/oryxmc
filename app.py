@@ -8,7 +8,12 @@ from functools import wraps
 import engine
 
 ALLOCATION_TOLERANCE = 0.006  # ±0.6% — shared across frontend and backend
-CODE_VERSION = "R5-fix2"  # Track deployed version
+MAX_SIM_BYTES = 120_000_000  # OOM protection for 512MB / 2-worker deploy
+
+
+def _estimate_sim_bytes(n_years, n_trajectories):
+    n_months = n_years * 12
+    return n_trajectories * n_months * 72 + n_trajectories * (n_months + 1) * 24
 
 IS_PROD = bool(os.environ.get("RENDER") or os.environ.get("FLASK_ENV") == "production")
 
@@ -50,6 +55,10 @@ def add_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "same-origin")
+    if IS_PROD:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
@@ -101,7 +110,11 @@ def api_indices():
             "n_months": len([m for m in DATA["ipca"]
                             if DATA["metadata"]["target_start"] <= m <= DATA["metadata"]["target_end"]]),
             "allocation_tolerance_pct": ALLOCATION_TOLERANCE * 100,
-            "code_version": CODE_VERSION,
+            "allowed_runs": {
+                str(y): [t for t in (1000, 5000, 10000, 20000)
+                         if _estimate_sim_bytes(y, t) <= MAX_SIM_BYTES]
+                for y in (5, 10, 15, 20, 25, 30, 40, 50)
+            },
         },
     })
 
@@ -171,11 +184,8 @@ def api_simulate():
         if n_trajectories <= 0 or n_trajectories > 20000:
             return jsonify({"error": "Número de trajetórias deve ser entre 1 e 20.000"}), 400
 
-        # Reject oversized requests (OOM protection for 512MB / 2-worker deploy)
-        # Engine allocates ~8 float64 arrays (n_traj, n_months) + 1 int64 index array
-        n_months_est = n_years * 12
-        estimated_bytes = n_trajectories * n_months_est * 72 + n_trajectories * (n_months_est + 1) * 24
-        if estimated_bytes > 120_000_000:
+        # Reject oversized requests (OOM protection)
+        if _estimate_sim_bytes(n_years, n_trajectories) > MAX_SIM_BYTES:
             return jsonify({"error": "Simulação muito grande para o servidor atual"}), 400
 
         # Validate allocations
@@ -213,13 +223,6 @@ def api_simulate():
             benchmark_name="CDI",
         )
         results["warnings"] = portfolio["warnings"]
-        results["_debug"] = {
-            "code_version": CODE_VERSION,
-            "portfolio_returns_len": len(portfolio["portfolio_returns"]),
-            "portfolio_returns_min": float(portfolio["portfolio_returns"].min()),
-            "portfolio_returns_max": float(portfolio["portfolio_returns"].max()),
-            "portfolio_returns_dtype": str(portfolio["portfolio_returns"].dtype),
-        }
 
         return jsonify(results)
 

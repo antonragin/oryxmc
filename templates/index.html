@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script src="https://cdn.plot.ly/plotly-locale-pt-br-latest.js"></script>
+    <script src="https://cdn.plot.ly/plotly-locale-pt-br-2.35.2.js"></script>
     <style>
         :root {
             --bg-primary: #0f172a;
@@ -447,12 +447,12 @@
                     <div class="param-grid">
                         <div class="param-group">
                             <label>Valor Inicial (R$)</label>
-                            <input type="number" id="initialValue" value="1000000" min="1000" step="10000" oninput="updateInitialValueHint()">
+                            <input type="number" id="initialValue" value="1000000" min="1000" step="10000" oninput="updateInitialValueHint(); updateWithdrawalHint(); saveState()">
                             <div id="initialValueFmt" style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">R$ 1.000.000</div>
                         </div>
                         <div class="param-group">
                             <label>Horizonte (anos)</label>
-                            <select id="nYears">
+                            <select id="nYears" onchange="syncAllowedTrajectories(); saveState()">
                                 <option value="5">5 anos</option>
                                 <option value="10" selected>10 anos</option>
                                 <option value="15">15 anos</option>
@@ -463,22 +463,22 @@
                         </div>
                         <div class="param-group">
                             <label>Modo de Retirada</label>
-                            <select id="withdrawalMode" onchange="updateWithdrawalUI()">
+                            <select id="withdrawalMode" onchange="updateWithdrawalUI(); saveState()">
                                 <option value="fixed" selected>Valor fixo real (R$)</option>
                                 <option value="percent">% do valor inicial (SWR)</option>
                             </select>
                         </div>
                         <div class="param-group" id="withdrawalFixedGroup">
                             <label>Retirada Anual Real (R$)</label>
-                            <input type="number" id="withdrawal" value="0" min="0" step="10000">
+                            <input type="number" id="withdrawal" value="0" min="0" step="10000" oninput="updateWithdrawalHint(); saveState()">
                         </div>
                         <div class="param-group" id="withdrawalPercentGroup" style="display:none;">
                             <label>Taxa SWR (% a.a.)</label>
-                            <input type="number" id="withdrawalPercent" value="0" min="0" max="100" step="0.1">
+                            <input type="number" id="withdrawalPercent" value="0" min="0" max="100" step="0.1" oninput="updateWithdrawalHint(); saveState()">
                         </div>
                         <div class="param-group">
                             <label>Trajetórias</label>
-                            <select id="nTraj">
+                            <select id="nTraj" onchange="saveState()">
                                 <option value="5000">5.000</option>
                                 <option value="10000" selected>10.000</option>
                                 <option value="20000">20.000</option>
@@ -564,6 +564,7 @@
         let CURRENT_Y_SCALE = 'linear';
         let RUNNING = false;
         let ALLOCATION_TOLERANCE_PCT = 0.6;
+        let ALLOWED_RUNS = {};
         const PLOTLY_CONFIG = { responsive: true, displayModeBar: false, locale: 'pt-BR' };
 
         // Presets
@@ -593,8 +594,10 @@
                 INDICES = data.indices;
                 METADATA = data.metadata || {};
                 ALLOCATION_TOLERANCE_PCT = Number(METADATA.allocation_tolerance_pct) || 0.6;
+                ALLOWED_RUNS = METADATA.allowed_runs || {};
                 renderAllocationForm();
                 loadState();
+                syncAllowedTrajectories();
                 updateMethodology();
                 updateInitialValueHint();
                 updateWithdrawalHint();
@@ -709,6 +712,19 @@
             });
             updateTotal();
             saveState();
+        }
+
+        function syncAllowedTrajectories() {
+            const year = document.getElementById('nYears').value;
+            const allowed = new Set((ALLOWED_RUNS[year] || []).map(String));
+            const trajSel = document.getElementById('nTraj');
+            [...trajSel.options].forEach(opt => {
+                opt.disabled = !allowed.has(opt.value);
+            });
+            if (trajSel.selectedOptions[0] && trajSel.selectedOptions[0].disabled) {
+                const first = [...trajSel.options].find(o => !o.disabled);
+                if (first) trajSel.value = first.value;
+            }
         }
 
         function updateWithdrawalUI() {
@@ -1257,8 +1273,10 @@
             }
 
             const refVal = stats.has_withdrawals ? 0 : params.initial_value;
-            const xMin = Math.max(0, Math.min(mids[0] - binWidth, refVal, stats.final_median));
-            const xMax = Math.max(mids[mids.length - 1] + binWidth, refVal, stats.final_median);
+            const bounds = [refVal, stats.final_median];
+            if (stats.benchmark_final_median != null) bounds.push(stats.benchmark_final_median);
+            const xMin = Math.max(0, Math.min(mids[0] - binWidth, ...bounds));
+            const xMax = Math.max(mids[mids.length - 1] + binWidth, ...bounds);
 
             Plotly.react('histChart', [trace], {
                 title: {
