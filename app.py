@@ -269,13 +269,13 @@ def api_simulate():
         # Parse optional seed for reproducibility
         raw_seed = params.get("seed")
         if raw_seed in (None, ""):
-            seed = secrets.randbits(63)
+            seed = secrets.randbits(53)  # Stay within JS Number.MAX_SAFE_INTEGER
         else:
             try:
                 seed = _parse_int(params, "seed")
             except (TypeError, ValueError, OverflowError):
                 return jsonify({"error": "Seed inválido"}), 400
-            if seed < 0 or seed > 2**63 - 1:
+            if seed < 0 or seed > 2**53 - 1:
                 return jsonify({"error": "Seed inválido"}), 400
 
         # Validate allocations

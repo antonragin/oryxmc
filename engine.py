@@ -348,8 +348,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     # np.cumsum, np.true_divide with out= etc. can silently mutate source arrays
     # for arrays exceeding certain size thresholds. We protect against this by
     # using .copy() liberally and avoiding patterns known to trigger the bug.
-    sampled_returns = portfolio_returns[sampled_idx].copy()
-    sampled_ipca = ipca[sampled_idx].copy()
+    # Fancy indexing always creates a new independent array — no .copy() needed
+    sampled_returns = portfolio_returns[sampled_idx]
+    sampled_ipca = ipca[sampled_idx]
 
     # Real returns: (1+r)/(1+i) - 1 = expm1(log1p(r) - log1p(i))
     log_ret = np.log1p(sampled_returns)    # does NOT modify sampled_returns
@@ -367,9 +368,11 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     def simulate_nominal_paths(monthly_rets):
         """Build trajectory from monthly returns (not log returns)."""
         if not has_withdrawals:
-            # Build cumulative product via log space using a fresh copy
-            log_r = np.log1p(monthly_rets.copy())
-            cum_log_r = np.cumsum(log_r, axis=1)
+            # Build cumulative product via log space
+            # np.log1p creates a new array; cumsum may mutate, so copy log_r
+            log_r = np.log1p(monthly_rets)
+            cum_log_r = np.cumsum(log_r.copy(), axis=1)
+            del log_r
             traj = np.empty((n_trajectories, n_months + 1), dtype=float)
             traj[:, 0] = initial_value
             traj[:, 1:] = initial_value * np.exp(cum_log_r)
@@ -392,7 +395,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     sampled_benchmark = None
     sampled_benchmark_real = None
     if benchmark_returns is not None:
-        sampled_benchmark = benchmark_returns[sampled_idx].copy()
+        sampled_benchmark = benchmark_returns[sampled_idx]
         log_bench = np.log1p(sampled_benchmark)
         sampled_benchmark_real = np.expm1(log_bench - log_ipca)
         benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
@@ -413,11 +416,11 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         cagrs[valid] = np.power(final[valid] / initial_value, 1 / n_years) - 1
 
         # Cash-flow-neutral NAV for drawdown/TWR (unaffected by withdrawals)
-        # Use .copy() to prevent numpy mutation of sampled_rets
-        log_sampled = np.log1p(sampled_rets.copy())
+        log_sampled = np.log1p(sampled_rets)
         nav_paths = np.empty((sampled_rets.shape[0], sampled_rets.shape[1] + 1), dtype=float)
         nav_paths[:, 0] = 1.0
-        nav_paths[:, 1:] = np.exp(np.cumsum(log_sampled, axis=1))
+        nav_paths[:, 1:] = np.exp(np.cumsum(log_sampled.copy(), axis=1))
+        del log_sampled
 
         twr_cagrs = np.power(nav_paths[:, -1], 1.0 / n_years) - 1.0
         ann_vol = (np.std(sampled_rets, axis=1, ddof=1) * np.sqrt(12)
@@ -459,6 +462,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         max_dd = drawdowns.min(axis=1)
         stats["median_max_drawdown"] = float(np.median(max_dd))
         stats["p10_max_drawdown"] = float(np.percentile(max_dd, 10))
+        del peaks, drawdowns, nav_paths, max_dd
 
         # Benchmark comparison (path-matched)
         if bench_trajectories is not None:
@@ -506,8 +510,16 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
     nominal_stats = compute_stats(traj_nominal, sampled_returns,
                                   benchmark_nominal, sampled_benchmark)
+    # Free nominal arrays before computing real stats to halve peak memory
+    del traj_nominal, sampled_returns
+    if benchmark_nominal is not None:
+        del benchmark_nominal, sampled_benchmark
+
     real_stats = compute_stats(traj_real, sampled_real_returns,
                                benchmark_real, sampled_benchmark_real)
+    del traj_real, sampled_real_returns
+    if benchmark_real is not None:
+        del benchmark_real, sampled_benchmark_real
 
     return {
         "params": {
