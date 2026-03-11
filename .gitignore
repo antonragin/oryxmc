@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+venv/
+data_quantum_raw.json
+data_intl_raw.json
+*.ipynb
+MC_data.csv
+proj_spec.txt
+git_access_info.txt
+render_access_info.txt

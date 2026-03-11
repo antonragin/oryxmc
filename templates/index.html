@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OryxMC — Simulador Monte Carlo</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: rgba(30, 41, 59, 0.8);
+            --border: rgba(100, 116, 139, 0.25);
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent: #22d3ee;
+            --accent-dark: #0891b2;
+            --green: #34d399;
+            --red: #f87171;
+            --orange: #fb923c;
+            --radius: 12px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        /* Header */
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .logo { font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+        .logo span { color: var(--text-secondary); font-weight: 300; }
+        .header-right { display: flex; align-items: center; gap: 16px; }
+        .header-right a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 13px;
+            transition: color 0.2s;
+        }
+        .header-right a:hover { color: var(--text-primary); }
+
+        /* Layout */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px 32px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 24px;
+        }
+        @media (max-width: 1024px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            backdrop-filter: blur(10px);
+        }
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-title .icon { color: var(--accent); font-size: 18px; }
+
+        /* Category sections */
+        .category {
+            margin-bottom: 20px;
+        }
+        .category-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent);
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Allocation rows */
+        .alloc-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .alloc-name {
+            flex: 1;
+            font-size: 13px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .alloc-name .short-hist {
+            font-size: 10px;
+            color: var(--orange);
+            margin-left: 4px;
+        }
+        .alloc-input {
+            width: 70px;
+            padding: 6px 8px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 13px;
+            text-align: right;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .alloc-input:focus { border-color: var(--accent); }
+        .alloc-pct { color: var(--text-muted); font-size: 12px; width: 14px; }
+
+        /* Total bar */
+        .total-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            margin-top: 8px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .total-value { font-size: 18px; }
+        .total-value.ok { color: var(--green); }
+        .total-value.err { color: var(--red); }
+
+        /* Parameters */
+        .param-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        .param-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        .param-group input, .param-group select {
+            width: 100%;
+            padding: 8px 10px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+        }
+        .param-group input:focus, .param-group select:focus {
+            border-color: var(--accent);
+        }
+        .param-group select option { background: var(--bg-secondary); }
+
+        /* Run button */
+        .btn-run {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--accent-dark), var(--accent));
+            border: none;
+            border-radius: 8px;
+            color: var(--bg-primary);
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+            margin-top: 16px;
+            letter-spacing: 0.3px;
+        }
+        .btn-run:hover { opacity: 0.9; }
+        .btn-run:active { transform: scale(0.99); }
+        .btn-run:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Results */
+        .results-area { display: flex; flex-direction: column; gap: 20px; }
+        .results-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+            color: var(--text-muted);
+            font-size: 15px;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        /* Stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .stat-card {
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            text-align: center;
+        }
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .stat-value.positive { color: var(--green); }
+        .stat-value.negative { color: var(--red); }
+
+        /* Chart container */
+        .chart-container {
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .chart-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 0;
+        }
+        .chart-tab {
+            padding: 10px 20px;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .chart-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        .chart-tab:hover { color: var(--text-primary); }
+
+        /* Warnings */
+        .warnings {
+            background: rgba(251, 146, 60, 0.1);
+            border: 1px solid rgba(251, 146, 60, 0.25);
+            border-radius: 8px;
+            padding: 14px;
+        }
+        .warnings h4 {
+            color: var(--orange);
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+        .warnings p {
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.5;
+            margin-bottom: 4px;
+        }
+
+        /* Spinner */
+        .spinner {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(15, 23, 42, 0.3);
+            border-top-color: var(--bg-primary);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Preset buttons */
+        .presets {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .preset-btn {
+            padding: 6px 12px;
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .preset-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">Oryx<span>MC</span></div>
+        <div class="header-right">
+            <span style="color: var(--text-muted); font-size: 12px;">Simulador Monte Carlo de Portfólio</span>
+            <a href="/logout">Sair</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="grid">
+            <!-- LEFT PANEL: Allocation & Parameters -->
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <!-- Allocation Card -->
+                <div class="card">
+                    <div class="card-title">
+                        <span class="icon">&#9679;</span>
+                        Alocação do Portfólio
+                    </div>
+
+                    <div class="presets">
+                        <button class="preset-btn" onclick="applyPreset('conservative')">Conservador</button>
+                        <button class="preset-btn" onclick="applyPreset('moderate')">Moderado</button>
+                        <button class="preset-btn" onclick="applyPreset('aggressive')">Agressivo</button>
+                        <button class="preset-btn" onclick="applyPreset('global')">Global Diversificado</button>
+                        <button class="preset-btn" onclick="applyPreset('clear')">Limpar</button>
+                    </div>
+
+                    <div id="allocationForm"></div>
+
+                    <div class="total-bar">
+                        <span>Total</span>
+                        <span class="total-value" id="totalAlloc">0%</span>
+                    </div>
+                </div>
+
+                <!-- Parameters Card -->
+                <div class="card">
+                    <div class="card-title">
+                        <span class="icon">&#9881;</span>
+                        Parâmetros da Simulação
+                    </div>
+                    <div class="param-grid">
+                        <div class="param-group">
+                            <label>Valor Inicial (R$)</label>
+                            <input type="number" id="initialValue" value="1000000" min="1000" step="10000">
+                        </div>
+                        <div class="param-group">
+                            <label>Horizonte (anos)</label>
+                            <select id="nYears">
+                                <option value="5">5 anos</option>
+                                <option value="10" selected>10 anos</option>
+                                <option value="15">15 anos</option>
+                                <option value="20">20 anos</option>
+                                <option value="25">25 anos</option>
+                                <option value="30">30 anos</option>
+                            </select>
+                        </div>
+                        <div class="param-group">
+                            <label>Retirada Anual (R$)</label>
+                            <input type="number" id="withdrawal" value="0" min="0" step="10000">
+                        </div>
+                        <div class="param-group">
+                            <label>Trajetórias</label>
+                            <select id="nTraj">
+                                <option value="5000">5.000</option>
+                                <option value="10000" selected>10.000</option>
+                                <option value="20000">20.000</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn-run" id="runBtn" onclick="runSimulation()">
+                        Executar Simulação
+                    </button>
+                </div>
+            </div>
+
+            <!-- RIGHT PANEL: Results -->
+            <div class="results-area" id="resultsArea">
+                <div class="card">
+                    <div class="results-placeholder" id="placeholder">
+                        Configure a alocação do portfólio no painel esquerdo<br>
+                        e clique em "Executar Simulação"
+                    </div>
+                    <div id="resultsContent" style="display:none;">
+                        <!-- Warnings -->
+                        <div id="warningsBox" class="warnings" style="display:none; margin-bottom: 16px;">
+                            <h4>&#9888; Avisos de Substituição</h4>
+                            <div id="warningsText"></div>
+                        </div>
+
+                        <!-- Stats -->
+                        <div class="card-title" style="margin-top: 4px;">
+                            <span class="icon">&#9650;</span>
+                            <span id="statsTitle">Resultados Nominais</span>
+                        </div>
+                        <div class="stats-grid" id="statsGrid"></div>
+
+                        <!-- Chart Tabs -->
+                        <div class="chart-tabs">
+                            <button class="chart-tab active" onclick="switchView('nominal')" id="tabNominal">Nominal</button>
+                            <button class="chart-tab" onclick="switchView('real')" id="tabReal">Real (IPCA)</button>
+                        </div>
+
+                        <!-- Chart -->
+                        <div class="chart-container" id="chart" style="height: 450px;"></div>
+
+                        <!-- Secondary Stats -->
+                        <div class="card-title" style="margin-top: 20px;">
+                            <span class="icon">&#9632;</span>
+                            Distribuição do Valor Final
+                        </div>
+                        <div class="chart-container" id="histChart" style="height: 300px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let INDICES = [];
+        let RESULTS = null;
+        let CURRENT_VIEW = 'nominal';
+
+        // Presets
+        const PRESETS = {
+            conservative: { 'CDI': 40, 'IMA-B 5': 30, 'IRF-M': 15, 'SHY': 10, 'AGG': 5 },
+            moderate: { 'CDI': 20, 'IMA-B': 15, 'IRF-M': 10, 'Ibovespa': 20, 'SP500TR': 15, 'AGG': 10, 'VNQ': 10 },
+            aggressive: { 'Ibovespa': 35, 'SP500TR': 25, 'URTH': 10, 'EEM': 10, 'IMA-B 5+': 10, 'VNQ': 10 },
+            global: { 'CDI': 10, 'IMA-B': 10, 'Ibovespa': 15, 'SP500TR': 20, 'URTH': 10, 'ACWI': 5, 'AGG': 10, 'SHY': 5, 'VNQ': 10, 'IMA-B 5+': 5 },
+            clear: {},
+        };
+
+        const CATEGORY_ORDER = ['br_fixed_income', 'br_equities', 'intl_equities', 'intl_fixed_income', 'intl_reits'];
+        const CATEGORY_NAMES = {
+            br_fixed_income: 'Renda Fixa Brasil',
+            br_equities: 'Ações Brasil',
+            intl_equities: 'Ações Internacionais',
+            intl_fixed_income: 'Renda Fixa Internacional',
+            intl_reits: 'REITs Internacionais',
+        };
+
+        async function init() {
+            const res = await fetch('/api/indices');
+            INDICES = await res.json();
+            renderAllocationForm();
+        }
+
+        function renderAllocationForm() {
+            const form = document.getElementById('allocationForm');
+            let html = '';
+
+            for (const cat of CATEGORY_ORDER) {
+                const catIndices = INDICES.filter(i => i.category === cat);
+                if (!catIndices.length) continue;
+                html += `<div class="category"><div class="category-label">${CATEGORY_NAMES[cat]}</div>`;
+                for (const idx of catIndices) {
+                    const shortHist = !idx.has_full_history ?
+                        `<span class="short-hist" title="Disponível desde ${idx.start_date}">&#9679; desde ${idx.start_date.slice(0,4)}</span>` : '';
+                    html += `
+                        <div class="alloc-row">
+                            <span class="alloc-name" title="${idx.desc}">${idx.name}${shortHist}</span>
+                            <input class="alloc-input" type="number" id="alloc_${idx.key}"
+                                   data-key="${idx.key}" value="0" min="0" max="100" step="1"
+                                   oninput="updateTotal()">
+                            <span class="alloc-pct">%</span>
+                        </div>`;
+                }
+                html += '</div>';
+            }
+            form.innerHTML = html;
+            updateTotal();
+        }
+
+        function updateTotal() {
+            const inputs = document.querySelectorAll('.alloc-input');
+            let total = 0;
+            inputs.forEach(inp => { total += parseFloat(inp.value) || 0; });
+            const el = document.getElementById('totalAlloc');
+            el.textContent = total.toFixed(0) + '%';
+            el.className = 'total-value ' + (Math.abs(total - 100) < 0.5 ? 'ok' : 'err');
+        }
+
+        function applyPreset(name) {
+            const preset = PRESETS[name];
+            document.querySelectorAll('.alloc-input').forEach(inp => {
+                const key = inp.dataset.key;
+                inp.value = preset[key] || 0;
+            });
+            updateTotal();
+        }
+
+        async function runSimulation() {
+            const btn = document.getElementById('runBtn');
+            const allocations = {};
+            document.querySelectorAll('.alloc-input').forEach(inp => {
+                const val = parseFloat(inp.value) || 0;
+                if (val > 0) allocations[inp.dataset.key] = val / 100;
+            });
+
+            const total = Object.values(allocations).reduce((a, b) => a + b, 0);
+            if (Math.abs(total - 1.0) > 0.01) {
+                alert('A alocação total deve ser 100%.');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>Simulando...';
+
+            try {
+                const res = await fetch('/api/simulate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        allocations,
+                        initial_value: parseFloat(document.getElementById('initialValue').value),
+                        n_years: parseInt(document.getElementById('nYears').value),
+                        withdrawal_annual: parseFloat(document.getElementById('withdrawal').value),
+                        n_trajectories: parseInt(document.getElementById('nTraj').value),
+                    }),
+                });
+                const data = await res.json();
+                if (data.error) {
+                    alert('Erro: ' + data.error);
+                    return;
+                }
+                RESULTS = data;
+                renderResults();
+            } catch (e) {
+                alert('Erro na simulação: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Executar Simulação';
+            }
+        }
+
+        function renderResults() {
+            document.getElementById('placeholder').style.display = 'none';
+            document.getElementById('resultsContent').style.display = 'block';
+
+            // Warnings
+            const wBox = document.getElementById('warningsBox');
+            if (RESULTS.warnings && RESULTS.warnings.length > 0) {
+                wBox.style.display = 'block';
+                document.getElementById('warningsText').innerHTML =
+                    RESULTS.warnings.map(w => `<p>${w}</p>`).join('');
+            } else {
+                wBox.style.display = 'none';
+            }
+
+            switchView(CURRENT_VIEW);
+        }
+
+        function switchView(view) {
+            CURRENT_VIEW = view;
+            document.getElementById('tabNominal').className = 'chart-tab' + (view === 'nominal' ? ' active' : '');
+            document.getElementById('tabReal').className = 'chart-tab' + (view === 'real' ? ' active' : '');
+            document.getElementById('statsTitle').textContent =
+                view === 'nominal' ? 'Resultados Nominais' : 'Resultados Reais (ajustados pela inflação)';
+
+            const stats = RESULTS[view];
+            const params = RESULTS.params;
+            renderStats(stats, params);
+            renderChart(stats, params, view);
+            renderHistogram(stats, params, view);
+        }
+
+        function fmtBRL(v) {
+            if (v >= 1e6) return 'R$ ' + (v / 1e6).toFixed(2) + 'M';
+            if (v >= 1e3) return 'R$ ' + (v / 1e3).toFixed(0) + 'k';
+            return 'R$ ' + v.toFixed(0);
+        }
+
+        function renderStats(stats, params) {
+            const grid = document.getElementById('statsGrid');
+            const cagr = stats.median_cagr;
+            const items = [
+                { label: 'Mediana Final', value: fmtBRL(stats.final_median), cls: stats.final_median >= params.initial_value ? 'positive' : 'negative' },
+                { label: 'CAGR Mediano', value: (cagr * 100).toFixed(1) + '% a.a.', cls: cagr >= 0 ? 'positive' : 'negative' },
+                { label: 'P(Perda)', value: stats.prob_loss.toFixed(1) + '%', cls: stats.prob_loss > 30 ? 'negative' : '' },
+                { label: 'Percentil 5', value: fmtBRL(stats.final_p5), cls: '' },
+                { label: 'Percentil 95', value: fmtBRL(stats.final_p95), cls: 'positive' },
+                { label: 'Média Final', value: fmtBRL(stats.final_mean), cls: '' },
+            ];
+            grid.innerHTML = items.map(i => `
+                <div class="stat-card">
+                    <div class="stat-label">${i.label}</div>
+                    <div class="stat-value ${i.cls}">${i.value}</div>
+                </div>`).join('');
+        }
+
+        function renderChart(stats, params, view) {
+            const t = stats.time_years;
+            const colors = {
+                95: 'rgba(52, 211, 153, 0.12)',
+                75: 'rgba(52, 211, 153, 0.2)',
+                50: '#22d3ee',
+                25: 'rgba(248, 113, 113, 0.2)',
+                5: 'rgba(248, 113, 113, 0.12)',
+            };
+
+            const traces = [];
+
+            // Sample trajectories
+            const samples = stats.sample_trajectories.slice(0, 15);
+            for (const s of samples) {
+                traces.push({
+                    x: t, y: s, mode: 'lines',
+                    line: { color: 'rgba(100, 116, 139, 0.15)', width: 0.8 },
+                    showlegend: false, hoverinfo: 'skip',
+                });
+            }
+
+            // Percentile bands (shaded)
+            const p95 = stats.percentiles['95'];
+            const p75 = stats.percentiles['75'];
+            const p25 = stats.percentiles['25'];
+            const p5 = stats.percentiles['5'];
+
+            // 5-95 band
+            traces.push({
+                x: t.concat([...t].reverse()),
+                y: p95.concat([...p5].reverse()),
+                fill: 'toself', fillcolor: 'rgba(34, 211, 238, 0.06)',
+                line: { color: 'transparent' },
+                showlegend: false, hoverinfo: 'skip', name: 'P5-P95',
+            });
+            // 25-75 band
+            traces.push({
+                x: t.concat([...t].reverse()),
+                y: p75.concat([...p25].reverse()),
+                fill: 'toself', fillcolor: 'rgba(34, 211, 238, 0.12)',
+                line: { color: 'transparent' },
+                showlegend: false, hoverinfo: 'skip', name: 'P25-P75',
+            });
+
+            // Percentile lines
+            const pctConfigs = [
+                { p: '5', color: '#f87171', dash: 'dot', width: 1.2, name: 'P5' },
+                { p: '25', color: '#fb923c', dash: 'dash', width: 1.2, name: 'P25' },
+                { p: '50', color: '#22d3ee', dash: 'solid', width: 2.5, name: 'Mediana' },
+                { p: '75', color: '#34d399', dash: 'dash', width: 1.2, name: 'P75' },
+                { p: '95', color: '#34d399', dash: 'dot', width: 1.2, name: 'P95' },
+            ];
+            for (const c of pctConfigs) {
+                traces.push({
+                    x: t, y: stats.percentiles[c.p],
+                    mode: 'lines',
+                    line: { color: c.color, dash: c.dash, width: c.width },
+                    name: c.name,
+                    hovertemplate: c.name + ': R$ %{y:,.0f}<extra></extra>',
+                });
+            }
+
+            // Starting value line
+            traces.push({
+                x: [0, t[t.length - 1]], y: [params.initial_value, params.initial_value],
+                mode: 'lines',
+                line: { color: 'rgba(148, 163, 184, 0.4)', dash: 'dot', width: 1 },
+                name: 'Valor Inicial',
+                hoverinfo: 'skip',
+            });
+
+            const title = view === 'nominal'
+                ? 'Simulação Monte Carlo — Valores Nominais (BRL)'
+                : 'Simulação Monte Carlo — Valores Reais (ajustados pelo IPCA)';
+
+            Plotly.newPlot('chart', traces, {
+                title: { text: title, font: { size: 15, color: '#e2e8f0' }, x: 0.02 },
+                xaxis: {
+                    title: 'Anos', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)',
+                    zerolinecolor: 'rgba(100,116,139,0.15)',
+                },
+                yaxis: {
+                    title: 'Valor do Portfólio (R$)', color: '#94a3b8',
+                    gridcolor: 'rgba(100,116,139,0.15)',
+                    zerolinecolor: 'rgba(100,116,139,0.15)',
+                    tickformat: ',.0f',
+                },
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent',
+                font: { family: 'Inter, sans-serif', color: '#94a3b8' },
+                legend: {
+                    x: 0.01, y: 0.99, bgcolor: 'rgba(30,41,59,0.8)',
+                    bordercolor: 'rgba(100,116,139,0.2)', borderwidth: 1,
+                    font: { size: 11 },
+                },
+                margin: { t: 50, r: 20, b: 50, l: 80 },
+                hovermode: 'x unified',
+            }, { responsive: true, displayModeBar: false });
+        }
+
+        function renderHistogram(stats, params, view) {
+            // Get final values from sample trajectories (we have 20)
+            // Instead, use the percentile data to create a summary
+            const p = stats.percentiles;
+            const finalIdx = p['50'].length - 1;
+            const markers = [
+                { name: 'P5', val: stats.final_p5, color: '#f87171' },
+                { name: 'P25', val: stats.final_p25, color: '#fb923c' },
+                { name: 'Mediana', val: stats.final_median, color: '#22d3ee' },
+                { name: 'P75', val: stats.final_p75, color: '#34d399' },
+                { name: 'P95', val: stats.final_p95, color: '#34d399' },
+            ];
+
+            const trace = {
+                x: markers.map(m => m.name),
+                y: markers.map(m => m.val),
+                type: 'bar',
+                marker: {
+                    color: markers.map(m => m.color),
+                    opacity: 0.8,
+                },
+                text: markers.map(m => fmtBRL(m.val)),
+                textposition: 'outside',
+                textfont: { color: '#e2e8f0', size: 12 },
+                hovertemplate: '%{x}: R$ %{y:,.0f}<extra></extra>',
+            };
+
+            Plotly.newPlot('histChart', [trace], {
+                title: {
+                    text: view === 'nominal' ? 'Valor Final por Percentil (Nominal)' : 'Valor Final por Percentil (Real)',
+                    font: { size: 14, color: '#e2e8f0' }, x: 0.02,
+                },
+                xaxis: { color: '#94a3b8' },
+                yaxis: {
+                    color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)',
+                    tickformat: ',.0f',
+                },
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent',
+                font: { family: 'Inter, sans-serif', color: '#94a3b8' },
+                margin: { t: 45, r: 20, b: 40, l: 80 },
+                showlegend: false,
+                shapes: [{
+                    type: 'line', x0: -0.5, x1: 4.5,
+                    y0: params.initial_value, y1: params.initial_value,
+                    line: { color: 'rgba(148,163,184,0.5)', dash: 'dot', width: 1 },
+                }],
+                annotations: [{
+                    x: 4.3, y: params.initial_value,
+                    text: 'Valor Inicial', showarrow: false,
+                    font: { size: 10, color: '#94a3b8' }, yshift: 12,
+                }],
+            }, { responsive: true, displayModeBar: false });
+        }
+
+        // Init
+        init();
+    </script>
+</body>
+</html>
