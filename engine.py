@@ -67,7 +67,10 @@ def build_portfolio_returns(data, allocations):
     target_end = data["metadata"]["target_end"]
     all_months = sorted(m for m in data["ipca"] if target_start <= m <= target_end)
 
-    # Normalize weights to exactly 1.0
+    # Validate and normalize weights to exactly 1.0
+    for k, v in allocations.items():
+        if v < 0:
+            raise ValueError(f"Alocação negativa não permitida: {k}")
     clean = {k: v for k, v in allocations.items() if v > 0}
     total_weight = sum(clean.values())
     if total_weight <= 0:
@@ -181,6 +184,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     Withdrawals are applied monthly (1/12 of annual amount per month),
     adjusted for cumulative inflation in that trajectory.
     """
+    if n_years <= 0:
+        raise ValueError("Horizonte deve ser > 0")
+
     rng = np.random.default_rng(seed)
 
     n_months = n_years * 12
