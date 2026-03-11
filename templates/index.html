@@ -447,7 +447,7 @@
                     <div class="param-grid">
                         <div class="param-group">
                             <label>Valor Inicial (R$)</label>
-                            <input type="number" id="initialValue" value="1000000" min="1000" step="10000" oninput="updateInitialValueHint(); updateWithdrawalHint(); saveState()">
+                            <input type="number" id="initialValue" value="1000000" min="1000" max="1000000000000" step="10000" oninput="updateInitialValueHint(); updateWithdrawalHint(); saveState()">
                             <div id="initialValueFmt" style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">R$ 1.000.000</div>
                         </div>
                         <div class="param-group">
@@ -465,7 +465,7 @@
                         </div>
                         <div class="param-group" id="withdrawalFixedGroup">
                             <label>Retirada Anual Real (R$)</label>
-                            <input type="number" id="withdrawal" value="0" min="0" step="10000" oninput="updateWithdrawalHint(); saveState()">
+                            <input type="number" id="withdrawal" value="0" min="0" max="1000000000000" step="10000" oninput="updateWithdrawalHint(); saveState()">
                         </div>
                         <div class="param-group" id="withdrawalPercentGroup" style="display:none;">
                             <label>Taxa SWR (% a.a.)</label>
@@ -835,12 +835,15 @@
                     seed: document.getElementById('seed').value,
                 };
                 localStorage.setItem(STATE_KEY, JSON.stringify(state));
-                // Sync to URL hash for sharing
-                try {
-                    const params = new URLSearchParams();
-                    params.set('s', JSON.stringify(state));
-                    window.history.replaceState(null, null, '#' + params.toString());
-                } catch {}
+                // Debounce URL hash update to prevent Safari SecurityError (100 calls/30s limit)
+                clearTimeout(saveState._t);
+                saveState._t = setTimeout(() => {
+                    try {
+                        const params = new URLSearchParams();
+                        params.set('s', JSON.stringify(state));
+                        window.history.replaceState(null, null, '#' + params.toString());
+                    } catch {}
+                }, 400);
                 refreshStaleResultsNote();
             } catch {}
         }
@@ -1054,17 +1057,18 @@
                 const val = parseFloat(inp.value);
                 if (Number.isFinite(val) && val > 0) allocs[inp.dataset.key] = val;
             });
+            // Use parsed numeric values to avoid false stale detection ("1000" vs "1000.0")
             return JSON.stringify({
                 allocs,
-                iv: document.getElementById('initialValue').value,
-                ny: document.getElementById('nYears').value,
+                iv: parseFloat(document.getElementById('initialValue').value) || 0,
+                ny: parseInt(document.getElementById('nYears').value, 10) || 0,
                 wm: document.getElementById('withdrawalMode').value,
-                wa: document.getElementById('withdrawal').value,
-                wp: document.getElementById('withdrawalPercent').value,
-                nt: document.getElementById('nTraj').value,
+                wa: parseFloat(document.getElementById('withdrawal').value) || 0,
+                wp: parseFloat(document.getElementById('withdrawalPercent').value) || 0,
+                nt: parseInt(document.getElementById('nTraj').value, 10) || 0,
                 bm: document.getElementById('bootstrapMode').value,
-                bs: document.getElementById('blockSize').value,
-                seed: document.getElementById('seed').value,
+                bs: parseInt(document.getElementById('blockSize').value, 10) || 0,
+                seed: document.getElementById('seed').value.trim(),
             });
         }
 
