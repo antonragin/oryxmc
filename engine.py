@@ -317,6 +317,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         return traj
 
     sampled_returns = portfolio_returns[sampled_idx]
+    sampled_real_returns = (1.0 + sampled_returns) / (1.0 + sampled_ipca) - 1.0
 
     # Portfolio trajectories
     traj_nominal = simulate_nominal_paths(sampled_returns)
@@ -326,8 +327,11 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     # Benchmark trajectories (same sampled months)
     benchmark_nominal = None
     benchmark_real = None
+    sampled_benchmark = None
+    sampled_benchmark_real = None
     if benchmark_returns is not None:
         sampled_benchmark = benchmark_returns[sampled_idx]
+        sampled_benchmark_real = (1.0 + sampled_benchmark) / (1.0 + sampled_ipca) - 1.0
         benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
         benchmark_real = benchmark_nominal.copy()
         np.true_divide(benchmark_nominal, cum_inflation, out=benchmark_real)
@@ -336,17 +340,25 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     percentiles = [5, 10, 25, 50, 75, 90, 95]
     time_years = np.arange(n_months + 1) / 12.0
 
-    def compute_stats(trajectories, bench_trajectories=None):
+    def compute_stats(trajectories, sampled_rets, bench_trajectories=None, sampled_bench=None):
         final = trajectories[:, -1]
         pct_values = np.percentile(trajectories, percentiles, axis=0)
         pct_lines = {p: pct_values[i].tolist() for i, p in enumerate(percentiles)}
 
-        # Compute per-path CAGR then take median
         valid = final > 0
         cagrs = np.full(final.shape, -1.0, dtype=float)
         cagrs[valid] = np.power(final[valid] / initial_value, 1 / n_years) - 1
 
-        # Histogram of final values (30 bins)
+        # Cash-flow-neutral NAV for drawdown/TWR (unaffected by withdrawals)
+        nav_paths = np.empty((sampled_rets.shape[0], sampled_rets.shape[1] + 1), dtype=float)
+        nav_paths[:, 0] = 1.0
+        nav_paths[:, 1:] = np.cumprod(1.0 + sampled_rets, axis=1)
+
+        twr_cagrs = np.power(nav_paths[:, -1], 1.0 / n_years) - 1.0
+        ann_vol = (np.std(sampled_rets, axis=1, ddof=1) * np.sqrt(12)
+                   if sampled_rets.shape[1] > 1
+                   else np.zeros(sampled_rets.shape[0], dtype=float))
+
         if np.all(final == final[0]):
             hist_counts = np.array([len(final)])
             hist_mids = [float(final[0])]
@@ -372,12 +384,13 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             "has_withdrawals": has_withdrawals,
             "histogram": {"counts": hist_counts.tolist(), "mids": hist_mids},
             "min_path_value": float(np.min(trajectories)),
+            "median_twr_cagr": float(np.median(twr_cagrs)),
+            "median_ann_vol": float(np.median(ann_vol)),
         }
 
-        # Drawdown metrics
-        peaks = np.maximum.accumulate(trajectories, axis=1)
-        safe_peaks = np.where(peaks == 0, 1, peaks)
-        drawdowns = trajectories / safe_peaks - 1
+        # Drawdown on cash-flow-neutral NAV (not contaminated by withdrawals)
+        peaks = np.maximum.accumulate(nav_paths, axis=1)
+        drawdowns = nav_paths / peaks - 1.0
         max_dd = drawdowns.min(axis=1)
         stats["median_max_drawdown"] = float(np.median(max_dd))
         stats["p10_max_drawdown"] = float(np.percentile(max_dd, 10))
@@ -387,15 +400,30 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             bench_final = bench_trajectories[:, -1]
             stats["prob_beat_benchmark"] = float(np.mean(final > bench_final) * 100)
             stats["benchmark_final_median"] = float(np.median(bench_final))
+            if sampled_bench is not None and sampled_rets.shape[1] > 1:
+                excess = sampled_rets - sampled_bench
+                excess_mean = np.mean(excess, axis=1)
+                excess_vol = np.std(excess, axis=1, ddof=1)
+                sharpe = np.full(excess_mean.shape, np.nan, dtype=float)
+                valid_sharpe = excess_vol > 0
+                sharpe[valid_sharpe] = (
+                    excess_mean[valid_sharpe] / excess_vol[valid_sharpe] * np.sqrt(12)
+                )
+                finite_sharpe = sharpe[np.isfinite(sharpe)]
+                stats["median_sharpe_vs_benchmark"] = (
+                    float(np.median(finite_sharpe)) if finite_sharpe.size else None
+                )
+            else:
+                stats["median_sharpe_vs_benchmark"] = None
         else:
             stats["prob_beat_benchmark"] = None
             stats["benchmark_final_median"] = None
+            stats["median_sharpe_vs_benchmark"] = None
 
         if has_withdrawals:
             stats["prob_ruin"] = float(np.mean(final <= 0) * 100)
             stats["median_cagr"] = None
             stats["prob_loss"] = None
-            # Survival analysis: find first ruin month per trajectory
             ruined = final <= 0
             if np.any(ruined):
                 ruin_mask = trajectories[ruined] <= 0
@@ -411,8 +439,10 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
         return stats
 
-    nominal_stats = compute_stats(traj_nominal, benchmark_nominal)
-    real_stats = compute_stats(traj_real, benchmark_real)
+    nominal_stats = compute_stats(traj_nominal, sampled_returns,
+                                  benchmark_nominal, sampled_benchmark)
+    real_stats = compute_stats(traj_real, sampled_real_returns,
+                               benchmark_real, sampled_benchmark_real)
 
     return {
         "params": {

@@ -217,8 +217,9 @@ def api_simulate():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception:
-        app.logger.exception("api_simulate failed")
-        return jsonify({"error": "Erro interno do servidor"}), 500
+        error_id = secrets.token_hex(4)
+        app.logger.exception("api_simulate failed [error_id=%s]", error_id)
+        return jsonify({"error": "Erro interno do servidor", "error_id": error_id}), 500
 
 
 if __name__ == "__main__":
