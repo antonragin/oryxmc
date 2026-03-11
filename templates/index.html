@@ -804,7 +804,8 @@
                 const wp = parseFloat(document.getElementById('withdrawalPercent').value);
                 if (!Number.isFinite(wp) || wp <= 0) { el.textContent = ''; return; }
                 const annual = initialValue * (wp / 100);
-                el.textContent = wp.toFixed(1).replace('.', ',') + '% SWR = ' + fmtBRLFull(annual) + '/ano real (' + fmtBRLFull(annual / 12) + '/mês), calculado sobre o valor inicial.';
+                const wpStr = wp.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 3 });
+                el.textContent = wpStr + '% SWR = ' + fmtBRLFull(annual) + '/ano real (' + fmtBRLFull(annual / 12) + '/mês), calculado sobre o valor inicial.';
             } else {
                 const wa = parseFloat(document.getElementById('withdrawal').value);
                 if (!Number.isFinite(wa) || wa <= 0) { el.textContent = ''; return; }

@@ -358,9 +358,22 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     sampled_real_returns = np.expm1(log_ret - log_ipca)
     del log_ret  # free memory — no longer needed after real returns computed
 
+    # Compute benchmark real returns now so we can free sampled_idx and log_ipca
+    benchmark_nominal = None
+    benchmark_real = None
+    sampled_benchmark = None
+    sampled_benchmark_real = None
+    if benchmark_returns is not None:
+        sampled_benchmark = benchmark_returns[sampled_idx]
+        log_bench = np.log1p(sampled_benchmark)
+        sampled_benchmark_real = np.expm1(log_bench - log_ipca)
+        del log_bench
+    del sampled_idx  # free memory — no longer needed
+
     # Cumulative inflation: cumprod(1+i) = exp(cumsum(log1p(i)))
     # Use a COPY of log_ipca since cumsum may mutate the input on some builds
     cum_log_ipca = np.cumsum(log_ipca.copy(), axis=1)
+    del log_ipca  # free memory — no longer needed
     cum_inflation = np.ones((n_trajectories, n_months + 1), dtype=float)
     cum_inflation[:, 1:] = np.exp(cum_log_ipca)
     del sampled_ipca, cum_log_ipca  # free memory — no longer needed
@@ -389,18 +402,10 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     traj_nominal = simulate_nominal_paths(sampled_returns)
     traj_real = (traj_nominal.copy()) / cum_inflation
 
-    # Benchmark trajectories (same sampled months)
-    benchmark_nominal = None
-    benchmark_real = None
-    sampled_benchmark = None
-    sampled_benchmark_real = None
+    # Benchmark trajectories (same sampled months, same cumulative inflation)
     if benchmark_returns is not None:
-        sampled_benchmark = benchmark_returns[sampled_idx]
-        log_bench = np.log1p(sampled_benchmark)
-        sampled_benchmark_real = np.expm1(log_bench - log_ipca)
         benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
         benchmark_real = (benchmark_nominal.copy()) / cum_inflation
-    del sampled_idx, log_ipca  # free memory — no longer needed after benchmark
 
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]
@@ -415,17 +420,30 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         cagrs = np.full(final.shape, -1.0, dtype=float)
         cagrs[valid] = np.power(final[valid] / initial_value, 1 / n_years) - 1
 
-        # Cash-flow-neutral NAV for drawdown/TWR (unaffected by withdrawals)
-        log_sampled = np.log1p(sampled_rets)
-        nav_paths = np.empty((sampled_rets.shape[0], sampled_rets.shape[1] + 1), dtype=float)
-        nav_paths[:, 0] = 1.0
-        nav_paths[:, 1:] = np.exp(np.cumsum(log_sampled.copy(), axis=1))
-        del log_sampled
-
-        twr_cagrs = np.power(nav_paths[:, -1], 1.0 / n_years) - 1.0
         ann_vol = (np.std(sampled_rets, axis=1, ddof=1) * np.sqrt(12)
                    if sampled_rets.shape[1] > 1
                    else np.zeros(sampled_rets.shape[0], dtype=float))
+
+        # Cash-flow-neutral NAV for drawdown/TWR (unaffected by withdrawals)
+        if not has_withdrawals:
+            # Without withdrawals, trajectories ARE the cash-flow-neutral path
+            twr_cagrs = cagrs
+            peaks = np.maximum.accumulate(trajectories, axis=1)
+            drawdowns = trajectories / peaks - 1.0
+            max_dd = drawdowns.min(axis=1)
+            del peaks, drawdowns
+        else:
+            # Rebuild NAV from raw returns to isolate from withdrawal effects
+            log_sampled = np.log1p(sampled_rets)
+            nav_paths = np.empty((sampled_rets.shape[0], sampled_rets.shape[1] + 1), dtype=float)
+            nav_paths[:, 0] = 1.0
+            nav_paths[:, 1:] = np.exp(np.cumsum(log_sampled.copy(), axis=1))
+            del log_sampled
+            twr_cagrs = np.power(nav_paths[:, -1], 1.0 / n_years) - 1.0
+            peaks = np.maximum.accumulate(nav_paths, axis=1)
+            drawdowns = nav_paths / peaks - 1.0
+            max_dd = drawdowns.min(axis=1)
+            del peaks, drawdowns, nav_paths
 
         if np.all(final == final[0]):
             hist_counts = np.array([len(final)])
@@ -456,13 +474,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             "median_ann_vol": float(np.median(ann_vol)),
         }
 
-        # Drawdown on cash-flow-neutral NAV (not contaminated by withdrawals)
-        peaks = np.maximum.accumulate(nav_paths, axis=1)
-        drawdowns = nav_paths / peaks - 1.0
-        max_dd = drawdowns.min(axis=1)
         stats["median_max_drawdown"] = float(np.median(max_dd))
         stats["p10_max_drawdown"] = float(np.percentile(max_dd, 10))
-        del peaks, drawdowns, nav_paths, max_dd
+        del max_dd
 
         # Benchmark comparison (path-matched)
         if bench_trajectories is not None:
