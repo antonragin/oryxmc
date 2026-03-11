@@ -1325,7 +1325,10 @@
                 hoverinfo: 'skip',
             });
 
-            const yearTicks = Array.from({ length: Math.floor(params.n_years) + 1 }, (_, i) => i);
+            const step = params.n_years > 30 ? 5 : (params.n_years >= 15 ? 2 : 1);
+            const yearTicks = [];
+            for (let i = 0; i <= params.n_years; i += step) yearTicks.push(i);
+            if (yearTicks[yearTicks.length - 1] !== params.n_years) yearTicks.push(params.n_years);
             const title = view === 'nominal'
                 ? 'Simulação Monte Carlo — Valores Nominais (BRL)'
                 : 'Simulação Monte Carlo — Valores Reais (ajustados pelo IPCA)';

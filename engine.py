@@ -399,16 +399,6 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             traj[:, t + 1] = np.maximum(traj[:, t + 1] - withdrawal, 0.0)
         return traj
 
-    # Portfolio trajectories
-    traj_nominal = simulate_nominal_paths(sampled_returns)
-    traj_real = traj_nominal / cum_inflation  # / always creates a new array
-
-    # Benchmark trajectories (same sampled months, same cumulative inflation)
-    if benchmark_returns is not None:
-        benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
-        benchmark_real = benchmark_nominal / cum_inflation
-    del cum_inflation  # free memory — no longer needed before compute_stats
-
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]
     time_years = np.arange(n_months + 1) / 12.0
@@ -526,12 +516,26 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
 
         return stats
 
+    # Compute nominal stats first, then free nominal arrays before creating real
+    traj_nominal = simulate_nominal_paths(sampled_returns)
+    benchmark_nominal = None
+    if benchmark_returns is not None:
+        benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
+
     nominal_stats = compute_stats(traj_nominal, sampled_returns,
                                   benchmark_nominal, sampled_benchmark)
-    # Free nominal arrays before computing real stats to halve peak memory
-    del traj_nominal, sampled_returns
+    del sampled_returns
+    if benchmark_returns is not None:
+        del sampled_benchmark
+
+    # Now compute real trajectories — nominal arrays freed first to halve peak memory
+    traj_real = traj_nominal / cum_inflation  # / always creates a new array
+    del traj_nominal
+    benchmark_real = None
     if benchmark_nominal is not None:
-        del benchmark_nominal, sampled_benchmark
+        benchmark_real = benchmark_nominal / cum_inflation
+        del benchmark_nominal
+    del cum_inflation
 
     real_stats = compute_stats(traj_real, sampled_real_returns,
                                benchmark_real, sampled_benchmark_real)
