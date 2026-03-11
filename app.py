@@ -8,6 +8,7 @@ from functools import wraps
 import engine
 
 ALLOCATION_TOLERANCE = 0.006  # ±0.6% — shared across frontend and backend
+CODE_VERSION = "R5-fix2"  # Track deployed version
 
 IS_PROD = bool(os.environ.get("RENDER") or os.environ.get("FLASK_ENV") == "production")
 
@@ -100,6 +101,7 @@ def api_indices():
             "n_months": len([m for m in DATA["ipca"]
                             if DATA["metadata"]["target_start"] <= m <= DATA["metadata"]["target_end"]]),
             "allocation_tolerance_pct": ALLOCATION_TOLERANCE * 100,
+            "code_version": CODE_VERSION,
         },
     })
 
@@ -211,6 +213,13 @@ def api_simulate():
             benchmark_name="CDI",
         )
         results["warnings"] = portfolio["warnings"]
+        results["_debug"] = {
+            "code_version": CODE_VERSION,
+            "portfolio_returns_len": len(portfolio["portfolio_returns"]),
+            "portfolio_returns_min": float(portfolio["portfolio_returns"].min()),
+            "portfolio_returns_max": float(portfolio["portfolio_returns"].max()),
+            "portfolio_returns_dtype": str(portfolio["portfolio_returns"].dtype),
+        }
 
         return jsonify(results)
 
