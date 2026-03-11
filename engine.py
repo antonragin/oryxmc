@@ -295,34 +295,38 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     # Bootstrap: sample month indices with replacement
     sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
 
-    sampled_returns = portfolio_returns[sampled_idx]
-    sampled_ipca = ipca[sampled_idx]
-
-    # Use log1p / expm1 to avoid "1.0 + array" expressions entirely.
-    # On some numpy builds, (1.0 + array) can mutate the source array in-place.
-    log_ret = np.log1p(sampled_returns)
-    log_ipca = np.log1p(sampled_ipca)
+    # IMPORTANT: On some numpy builds / platforms, operations like (1.0 + array),
+    # np.cumsum, np.true_divide with out= etc. can silently mutate source arrays
+    # for arrays exceeding certain size thresholds. We protect against this by
+    # using .copy() liberally and avoiding patterns known to trigger the bug.
+    sampled_returns = portfolio_returns[sampled_idx].copy()
+    sampled_ipca = ipca[sampled_idx].copy()
 
     # Real returns: (1+r)/(1+i) - 1 = expm1(log1p(r) - log1p(i))
+    log_ret = np.log1p(sampled_returns)    # does NOT modify sampled_returns
+    log_ipca = np.log1p(sampled_ipca)      # does NOT modify sampled_ipca
     sampled_real_returns = np.expm1(log_ret - log_ipca)
 
     # Cumulative inflation: cumprod(1+i) = exp(cumsum(log1p(i)))
-    cum_inflation = np.empty((n_trajectories, n_months + 1), dtype=float)
-    cum_inflation[:, 0] = 1.0
-    cum_inflation[:, 1:] = np.exp(np.cumsum(log_ipca, axis=1))
+    # Use a COPY of log_ipca since cumsum may mutate the input on some builds
+    cum_log_ipca = np.cumsum(log_ipca.copy(), axis=1)
+    cum_inflation = np.ones((n_trajectories, n_months + 1), dtype=float)
+    cum_inflation[:, 1:] = np.exp(cum_log_ipca)
 
-    def simulate_nominal_paths(log_rets):
-        """Build trajectory from log returns: exp(cumsum(log1p(r)))."""
+    def simulate_nominal_paths(monthly_rets):
+        """Build trajectory from monthly returns (not log returns)."""
         if not has_withdrawals:
+            # Build cumulative product via log space using a fresh copy
+            log_r = np.log1p(monthly_rets.copy())
+            cum_log_r = np.cumsum(log_r, axis=1)
             traj = np.empty((n_trajectories, n_months + 1), dtype=float)
             traj[:, 0] = initial_value
-            traj[:, 1:] = initial_value * np.exp(np.cumsum(log_rets, axis=1))
+            traj[:, 1:] = initial_value * np.exp(cum_log_r)
             return traj
         # Withdrawal path needs per-step computation
-        growth = np.exp(log_rets)  # (1 + r) per month
         traj = np.full((n_trajectories, n_months + 1), initial_value, dtype=float)
         for t in range(n_months):
-            traj[:, t + 1] = traj[:, t] * growth[:, t]
+            traj[:, t + 1] = traj[:, t] * (1.0 + monthly_rets[:, t])
             withdrawal = monthly_withdrawal_real * cum_inflation[:, t + 1]
             traj[:, t + 1] = np.maximum(traj[:, t + 1] - withdrawal, 0.0)
         return traj
@@ -335,9 +339,9 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         "cum_inflation_max": float(cum_inflation.max()),
     }
 
-    # Portfolio trajectories — avoid out= parameter (Render numpy bug)
-    traj_nominal = simulate_nominal_paths(log_ret)
-    traj_real = traj_nominal / cum_inflation
+    # Portfolio trajectories — pass original returns, let function handle log space
+    traj_nominal = simulate_nominal_paths(sampled_returns)
+    traj_real = (traj_nominal.copy()) / cum_inflation
 
     # Benchmark trajectories (same sampled months)
     benchmark_nominal = None
@@ -345,11 +349,11 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     sampled_benchmark = None
     sampled_benchmark_real = None
     if benchmark_returns is not None:
-        sampled_benchmark = benchmark_returns[sampled_idx]
+        sampled_benchmark = benchmark_returns[sampled_idx].copy()
         log_bench = np.log1p(sampled_benchmark)
         sampled_benchmark_real = np.expm1(log_bench - log_ipca)
-        benchmark_nominal = simulate_nominal_paths(log_bench)
-        benchmark_real = benchmark_nominal / cum_inflation
+        benchmark_nominal = simulate_nominal_paths(sampled_benchmark)
+        benchmark_real = (benchmark_nominal.copy()) / cum_inflation
 
     # Compute statistics
     percentiles = [5, 10, 25, 50, 75, 90, 95]
