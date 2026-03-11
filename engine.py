@@ -292,9 +292,8 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         if len(benchmark_returns) != n_hist:
             raise ValueError("Benchmark desalinhado com o histórico")
 
-    # Bootstrap: sample month indices with replacement (uint16 saves memory)
-    idx_dtype = np.uint16 if n_hist <= np.iinfo(np.uint16).max else np.uint32
-    sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months), dtype=idx_dtype)
+    # Bootstrap: sample month indices with replacement
+    sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
     sampled_ipca = ipca[sampled_idx]
 
     # Vectorized cumulative inflation

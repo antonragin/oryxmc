@@ -170,9 +170,9 @@ def api_simulate():
             return jsonify({"error": "Número de trajetórias deve ser entre 1 e 20.000"}), 400
 
         # Reject oversized requests (OOM protection for 512MB / 2-worker deploy)
-        # Engine allocates ~6 full arrays of size (n_traj, n_months): ~48 bytes/cell
+        # Engine allocates ~8 float64 arrays (n_traj, n_months) + 1 int64 index array
         n_months_est = n_years * 12
-        estimated_bytes = n_trajectories * n_months_est * 48 + n_trajectories * (n_months_est + 1) * 24
+        estimated_bytes = n_trajectories * n_months_est * 72 + n_trajectories * (n_months_est + 1) * 24
         if estimated_bytes > 120_000_000:
             return jsonify({"error": "Simulação muito grande para o servidor atual"}), 400
 
