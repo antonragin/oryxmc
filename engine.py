@@ -439,12 +439,14 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             max_dd = drawdowns.min(axis=1)
             del peaks, drawdowns, nav_paths
 
-        if np.all(final == final[0]):
+        _min = float(np.min(final))
+        _max = float(np.max(final))
+        if _min >= _max or not math.isfinite(_min) or not math.isfinite(_max):
             hist_counts = np.array([len(final)])
-            hist_mids = [float(final[0])]
+            hist_mids = [_min if math.isfinite(_min) else 0.0]
         else:
             hist_counts, hist_edges = np.histogram(
-                final, bins=30, range=(max(0, float(np.min(final))), float(np.max(final)))
+                final, bins=30, range=(max(0.0, _min), _max)
             )
             hist_mids = ((hist_edges[:-1] + hist_edges[1:]) / 2).tolist()
 
