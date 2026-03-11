@@ -50,12 +50,19 @@ def _parse_float(params, name, default=None, allow_zero=True):
 
 
 def _parse_int(params, name, default=None):
-    """Parse an integer field from request params, accepting int-like floats."""
+    """Parse an integer field from request params, accepting int-like floats and strings."""
     raw = params.get(name, default)
     if isinstance(raw, bool):
         raise ValueError(f"{name} inválido")
     if isinstance(raw, int):
         return raw
+    if isinstance(raw, str):
+        raw = raw.strip()
+        # Try direct int parse first (preserves precision for large integers)
+        try:
+            return int(raw)
+        except ValueError:
+            pass
     val = float(raw)
     if val != int(val):
         raise ValueError(f"{name} deve ser inteiro")
@@ -235,6 +242,19 @@ def api_simulate():
         if n_years not in ALLOWED_RUNS or n_trajectories not in ALLOWED_RUNS[n_years]:
             return jsonify({"error": "Combinação de horizonte e trajetórias não permitida neste servidor"}), 400
 
+        # Parse bootstrap mode
+        bootstrap_mode = params.get("bootstrap_mode", "iid")
+        if bootstrap_mode not in engine.BOOTSTRAP_MODES:
+            return jsonify({"error": "Modo de bootstrap inválido"}), 400
+        block_size = 12
+        if bootstrap_mode == "block":
+            try:
+                block_size = _parse_int(params, "block_size", default=12)
+            except (TypeError, ValueError, OverflowError):
+                return jsonify({"error": "Tamanho de bloco inválido"}), 400
+            if block_size not in engine.BLOCK_SIZES:
+                return jsonify({"error": "Tamanho de bloco deve ser 6 ou 12"}), 400
+
         # Parse optional seed for reproducibility
         raw_seed = params.get("seed")
         if raw_seed in (None, ""):
@@ -281,6 +301,8 @@ def api_simulate():
             seed=seed,
             benchmark_returns=BENCHMARK_CDI["portfolio_returns"],
             benchmark_name="CDI",
+            bootstrap_mode=bootstrap_mode,
+            block_size=block_size,
         )
         results["warnings"] = portfolio["warnings"]
         results["params"]["seed"] = seed

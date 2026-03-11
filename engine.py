@@ -4,6 +4,7 @@ All returns are in BRL. Supports nominal and real (IPCA-adjusted) simulations
 with optional periodic withdrawals.
 """
 import json
+import math
 import numpy as np
 from pathlib import Path
 
@@ -284,9 +285,24 @@ def build_portfolio_returns(data, allocations):
     }
 
 
+def _sample_block_indices(rng, n_hist, n_months, n_trajectories, block_size):
+    """Moving-block bootstrap: sample contiguous blocks with wrap-around."""
+    n_blocks = math.ceil(n_months / block_size)
+    starts = rng.integers(0, n_hist, size=(n_trajectories, n_blocks))
+    offsets = np.arange(block_size)
+    # starts[:, :, None] + offsets broadcasts to (n_traj, n_blocks, block_size)
+    idx = (starts[:, :, None] + offsets) % n_hist
+    return idx.reshape(n_trajectories, -1)[:, :n_months]
+
+
+BOOTSTRAP_MODES = ("iid", "block")
+BLOCK_SIZES = (6, 12)
+
+
 def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
                     n_trajectories=10000, withdrawal_annual=0.0, seed=None,
-                    benchmark_returns=None, benchmark_name=None):
+                    benchmark_returns=None, benchmark_name=None,
+                    bootstrap_mode="iid", block_size=12):
     """
     Run Monte Carlo simulation using bootstrap resampling.
 
@@ -322,7 +338,10 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             raise ValueError("Benchmark contém valores não-finitos")
 
     # Bootstrap: sample month indices with replacement
-    sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
+    if bootstrap_mode == "block":
+        sampled_idx = _sample_block_indices(rng, n_hist, n_months, n_trajectories, block_size)
+    else:
+        sampled_idx = rng.integers(0, n_hist, size=(n_trajectories, n_months))
 
     # IMPORTANT: On some numpy builds / platforms, operations like (1.0 + array),
     # np.cumsum, np.true_divide with out= etc. can silently mutate source arrays
@@ -494,6 +513,8 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             "withdrawal_annual": withdrawal_annual,
             "n_historical_months": n_hist,
             "benchmark_name": benchmark_name,
+            "bootstrap_mode": bootstrap_mode,
+            "block_size": block_size if bootstrap_mode == "block" else None,
         },
         "nominal": nominal_stats,
         "real": real_stats,

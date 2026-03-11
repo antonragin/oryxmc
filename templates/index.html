@@ -478,6 +478,20 @@
                             </select>
                         </div>
                         <div class="param-group">
+                            <label>Bootstrap</label>
+                            <select id="bootstrapMode" onchange="toggleBlockSize(); saveState()">
+                                <option value="iid" selected>Mensal (IID)</option>
+                                <option value="block">Blocos</option>
+                            </select>
+                        </div>
+                        <div class="param-group" id="blockSizeGroup" style="display:none;">
+                            <label>Tamanho do Bloco</label>
+                            <select id="blockSize" onchange="saveState()">
+                                <option value="6">6 meses</option>
+                                <option value="12" selected>12 meses</option>
+                            </select>
+                        </div>
+                        <div class="param-group">
                             <label>Seed (opcional)</label>
                             <input type="number" id="seed" min="0" step="1" placeholder="Aleatória" oninput="saveState()">
                         </div>
@@ -757,6 +771,11 @@
             updateTotal();
         }
 
+        function toggleBlockSize() {
+            const mode = document.getElementById('bootstrapMode').value;
+            document.getElementById('blockSizeGroup').style.display = mode === 'block' ? '' : 'none';
+        }
+
         function updateWithdrawalUI({ persist = true } = {}) {
             const mode = document.getElementById('withdrawalMode').value;
             document.getElementById('withdrawalFixedGroup').style.display = mode === 'fixed' ? '' : 'none';
@@ -807,6 +826,8 @@
                     withdrawalMode: document.getElementById('withdrawalMode').value,
                     withdrawalPercent: document.getElementById('withdrawalPercent').value,
                     nTraj: document.getElementById('nTraj').value,
+                    bootstrapMode: document.getElementById('bootstrapMode').value,
+                    blockSize: document.getElementById('blockSize').value,
                     seed: document.getElementById('seed').value,
                 };
                 localStorage.setItem(STATE_KEY, JSON.stringify(state));
@@ -837,7 +858,10 @@
                 setSelectIfValid('nYears', state.nYears);
                 setSelectIfValid('withdrawalMode', state.withdrawalMode);
                 setSelectIfValid('nTraj', state.nTraj);
+                setSelectIfValid('bootstrapMode', state.bootstrapMode);
+                setSelectIfValid('blockSize', state.blockSize);
                 if (state.seed != null) document.getElementById('seed').value = state.seed;
+                toggleBlockSize();
                 updateWithdrawalUI({ persist: false });
                 syncAllowedTrajectories();
                 updateTotal();
@@ -855,6 +879,8 @@
             document.getElementById('withdrawalPercent').disabled = disabled;
             document.getElementById('withdrawalMode').disabled = disabled;
             document.getElementById('nTraj').disabled = disabled;
+            document.getElementById('bootstrapMode').disabled = disabled;
+            document.getElementById('blockSize').disabled = disabled;
             document.getElementById('seed').disabled = disabled;
         }
 
@@ -889,6 +915,7 @@
             }
 
             const seedRaw = document.getElementById('seed').value.trim();
+            const bootstrapMode = document.getElementById('bootstrapMode').value;
             const payload = {
                 allocations,
                 initial_value: initialValue,
@@ -896,7 +923,11 @@
                 n_trajectories: nTraj,
                 withdrawal_mode: withdrawalMode,
             };
-            if (seedRaw) payload.seed = parseInt(seedRaw, 10);
+            if (seedRaw) payload.seed = seedRaw;
+            payload.bootstrap_mode = bootstrapMode;
+            if (bootstrapMode === 'block') {
+                payload.block_size = parseInt(document.getElementById('blockSize').value, 10);
+            }
             if (withdrawalMode === 'percent') {
                 const wp = parseFloat(document.getElementById('withdrawalPercent').value);
                 if (!Number.isFinite(wp) || wp < 0) {
@@ -972,12 +1003,13 @@
                     return;
                 }
                 RESULTS = data;
+                if (data.params && data.params.seed != null) {
+                    document.getElementById('seed').value = String(data.params.seed);
+                }
+                saveState();
                 LAST_RUN_SIGNATURE = currentFormSignature();
                 setStaleResultsNote('');
                 renderResults();
-                if (data.params && data.params.seed != null) {
-                    document.getElementById('seed').value = data.params.seed;
-                }
             } catch (e) {
                 errEl.textContent = 'Erro na simulação: ' + e.message;
                 errEl.style.display = 'block';
@@ -1012,6 +1044,8 @@
                 wa: document.getElementById('withdrawal').value,
                 wp: document.getElementById('withdrawalPercent').value,
                 nt: document.getElementById('nTraj').value,
+                bm: document.getElementById('bootstrapMode').value,
+                bs: document.getElementById('blockSize').value,
                 seed: document.getElementById('seed').value,
             });
         }
