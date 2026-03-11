@@ -464,6 +464,7 @@
         let INDICES = [];
         let RESULTS = null;
         let CURRENT_VIEW = 'nominal';
+        let RUNNING = false;
 
         // Presets
         const PRESETS = {
@@ -484,10 +485,16 @@
         };
 
         async function init() {
-            const res = await fetch('/api/indices');
-            if (res.status === 401) { window.location = '/login'; return; }
-            INDICES = await res.json();
-            renderAllocationForm();
+            try {
+                const res = await fetch('/api/indices');
+                if (res.status === 401) { window.location = '/login'; return; }
+                if (!res.ok) throw new Error('Falha ao carregar índices');
+                INDICES = await res.json();
+                renderAllocationForm();
+            } catch (e) {
+                document.getElementById('allocationForm').textContent =
+                    'Erro ao carregar dados: ' + e.message;
+            }
         }
 
         function renderAllocationForm() {
@@ -536,7 +543,7 @@
                 el.textContent = total.toFixed(0) + '% (faltam ' + remaining.toFixed(0) + '%)';
             }
             el.className = 'total-value ' + (valid ? 'ok' : 'err');
-            document.getElementById('runBtn').disabled = !valid;
+            document.getElementById('runBtn').disabled = RUNNING || !valid;
         }
 
         function applyPreset(name) {
@@ -549,7 +556,11 @@
         }
 
         async function runSimulation() {
+            if (RUNNING) return;
             const btn = document.getElementById('runBtn');
+            const errEl = document.getElementById('errorMsg');
+            errEl.style.display = 'none';
+
             const allocations = {};
             document.querySelectorAll('.alloc-input').forEach(inp => {
                 const val = parseFloat(inp.value) || 0;
@@ -557,9 +568,6 @@
             });
 
             const total = Object.values(allocations).reduce((a, b) => a + b, 0);
-            const errEl = document.getElementById('errorMsg');
-            errEl.style.display = 'none';
-
             if (Math.abs(total - 1.0) > 0.01) {
                 errEl.textContent = 'A alocação total deve ser 100%.';
                 errEl.style.display = 'block';
@@ -577,6 +585,7 @@
                 return;
             }
 
+            RUNNING = true;
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span>Simulando...';
 
@@ -593,6 +602,13 @@
                     }),
                 });
                 if (res.status === 401) { window.location = '/login'; return; }
+                if (!res.ok) {
+                    let msg = 'Erro do servidor';
+                    try { const d = await res.json(); msg = d.error || msg; } catch {}
+                    errEl.textContent = msg;
+                    errEl.style.display = 'block';
+                    return;
+                }
                 const data = await res.json();
                 if (data.error) {
                     errEl.textContent = data.error;
@@ -605,8 +621,10 @@
                 errEl.textContent = 'Erro na simulação: ' + e.message;
                 errEl.style.display = 'block';
             } finally {
+                RUNNING = false;
                 btn.disabled = false;
                 btn.innerHTML = 'Executar Simulação';
+                updateTotal();
             }
         }
 
