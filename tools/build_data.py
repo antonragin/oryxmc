@@ -662,6 +662,17 @@ def build(dry_run=False):
         size_mb = out_path.stat().st_size / 1024 / 1024
         print(f"\n  Wrote {out_path} ({size_mb:.2f} MB)")
 
+        # Compute efficient frontier (requires scipy, available at build time)
+        print("\n[9/9] Computing efficient frontier...")
+        from compute_frontier import compute_frontier as _compute_ef, compute_data_checksum
+        frontier = _compute_ef(output)
+        output["efficient_frontier"] = frontier
+        with open(out_path, "w") as f:
+            json.dump(output, f, indent=None, separators=(",", ":"))
+        size_mb = out_path.stat().st_size / 1024 / 1024
+        print(f"  Rewrote {out_path} ({size_mb:.2f} MB) with frontier")
+        print(f"  Data checksum: {frontier['data_checksum']}")
+
     print("\nDone.")
     return True
 

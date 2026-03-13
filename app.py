@@ -89,8 +89,10 @@ app.config["SESSION_COOKIE_SECURE"] = IS_PROD
 # Load data once at startup
 DATA = engine.load_data()
 engine.validate_data(DATA)
+engine.verify_frontier_checksum(DATA)
 INDICES = engine.get_available_indices(DATA)
 BENCHMARK_CDI = engine.build_portfolio_returns(DATA, {"CDI": 1.0})
+FRONTIER = DATA.get("efficient_frontier", {})
 
 
 def login_required(f):
@@ -201,6 +203,37 @@ def api_indices():
             "year_options": sorted(y for y, runs in ALLOWED_RUNS.items() if runs),
         },
     })
+
+
+@app.route("/api/frontier")
+@login_required
+def api_frontier():
+    return jsonify({"real": FRONTIER.get("real", []), "nominal": FRONTIER.get("nominal", [])})
+
+
+@app.route("/api/portfolio-point", methods=["POST"])
+@login_required
+def api_portfolio_point():
+    params = request.get_json(silent=True)
+    if not isinstance(params, dict):
+        return jsonify({"error": "JSON inválido"}), 400
+    allocations = params.get("allocations", {})
+    if not isinstance(allocations, dict) or not allocations:
+        return jsonify({"error": "allocations inválido"}), 400
+    try:
+        clean = {}
+        for k, v in allocations.items():
+            if k not in DATA["indices"]:
+                continue
+            v = float(v)
+            if v > 0:
+                clean[k] = v
+        if not clean:
+            return jsonify({"error": "Nenhuma alocação válida"}), 400
+        result = engine.compute_portfolio_risk_return(DATA, clean)
+        return jsonify(result)
+    except Exception:
+        return jsonify({"error": "Erro ao calcular ponto do portfólio"}), 500
 
 
 @app.route("/api/simulate", methods=["POST"])

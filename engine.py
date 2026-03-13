@@ -3,6 +3,7 @@
 All returns are in BRL. Supports nominal and real (IPCA-adjusted) simulations
 with optional periodic withdrawals.
 """
+import hashlib
 import json
 import math
 import numpy as np
@@ -297,6 +298,89 @@ def build_portfolio_returns(data, allocations):
         "portfolio_returns": np.array(portfolio_returns),
         "ipca": np.array(ipca_values),
         "warnings": warnings,
+    }
+
+
+def compute_data_checksum(data):
+    """SHA-256 over sorted index returns + IPCA — deterministic."""
+    h = hashlib.sha256()
+    for m in sorted(data["ipca"]):
+        h.update(f"ipca:{m}:{data['ipca'][m]:.10f}".encode())
+    for key in sorted(data["indices"]):
+        for m in sorted(data["indices"][key]["returns"]):
+            h.update(f"{key}:{m}:{data['indices'][key]['returns'][m]:.10f}".encode())
+    return "sha256:" + h.hexdigest()
+
+
+def verify_frontier_checksum(data):
+    """Verify frontier data matches historical returns. Raises ValueError on mismatch."""
+    frontier = data.get("efficient_frontier")
+    if not frontier:
+        raise ValueError(
+            "Fronteira eficiente ausente — execute: python tools/compute_frontier.py"
+        )
+    stored = frontier.get("data_checksum", "")
+    computed = compute_data_checksum(data)
+    if stored != computed:
+        raise ValueError(
+            "Dados históricos mudaram mas a fronteira eficiente não foi recalculada. "
+            "Execute: python tools/compute_frontier.py"
+        )
+
+
+def compute_portfolio_risk_return(data, allocations):
+    """Compute CAGR/vol/sharpe for an arbitrary portfolio (real + nominal).
+
+    Uses only numpy — no scipy needed. Returns dict with 'real' and 'nominal' keys.
+    """
+    target_start = data["metadata"]["target_start"]
+    target_end = data["metadata"]["target_end"]
+    months = sorted(m for m in data["ipca"] if target_start <= m <= target_end)
+    n_months = len(months)
+
+    # Normalize allocations
+    clean = {k: v for k, v in allocations.items() if v > 0}
+    total = sum(clean.values())
+    if total <= 0:
+        return None
+    clean = {k: v / total for k, v in clean.items()}
+
+    ipca_arr = np.array([data["ipca"][m] for m in months])
+    index_keys = sorted(data["indices"].keys())
+    cdi_idx = index_keys.index("CDI")
+
+    # Build weight vector
+    w = np.zeros(len(index_keys))
+    for k, v in clean.items():
+        if k in index_keys:
+            w[index_keys.index(k)] = v
+
+    # Build returns matrices
+    nominal_matrix = np.empty((n_months, len(index_keys)))
+    real_matrix = np.empty((n_months, len(index_keys)))
+    for j, key in enumerate(index_keys):
+        rets = data["indices"][key]["returns"]
+        for i, m in enumerate(months):
+            nom = rets.get(m, 0.0)
+            nominal_matrix[i, j] = nom
+            real_matrix[i, j] = (1.0 + nom) / (1.0 + ipca_arr[i]) - 1.0
+
+    def _stats(returns_matrix):
+        mu = np.mean(returns_matrix, axis=0)
+        Sigma = np.cov(returns_matrix, rowvar=False)
+        cdi_mu = mu[cdi_idx] * 12
+        port_mu = w.dot(mu) * 12
+        port_std = np.sqrt(w.dot(Sigma).dot(w) * 12)
+        sharpe = (port_mu - cdi_mu) / port_std if port_std > 1e-8 else 0
+        # CAGR from real returns
+        port_monthly = real_matrix.dot(w)
+        cum = np.prod(1.0 + port_monthly)
+        cagr = cum ** (12.0 / n_months) - 1.0
+        return {"cagr": round(cagr, 6), "vol": round(port_std, 6), "sharpe": round(sharpe, 4)}
+
+    return {
+        "real": _stats(real_matrix),
+        "nominal": _stats(nominal_matrix),
     }
 
 
