@@ -16,6 +16,7 @@ CATEGORIES = {
     "intl_equities": "Ações Internacionais",
     "intl_fixed_income": "Renda Fixa Internacional",
     "intl_reits": "REITs Internacionais",
+    "br_reits": "FIIs Brasil",
 }
 
 # Fallback indices when no selected index in a category has data for a month
@@ -25,6 +26,7 @@ CATEGORY_FALLBACKS = {
     "intl_equities": "SP500TR",
     "intl_fixed_income": "AGG",
     "intl_reits": "VNQ",
+    "br_reits": "IFIX",
 }
 
 
