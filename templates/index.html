@@ -1213,28 +1213,22 @@
 
             const stats = RESULTS[view];
             const params = RESULTS.params;
-            updateScaleToggle(stats);
+            updateScaleToggle();
             renderStats(stats, params);
             renderChart(stats, params, view);
             renderHistogram(stats, params, view);
             renderFrontierChart(view);
         }
 
-        function updateScaleToggle(stats) {
+        function updateScaleToggle() {
             const btn = document.getElementById('scaleToggle');
-            const canLog = stats && stats.min_path_value > 0;
-            if (!canLog && CURRENT_Y_SCALE === 'log') CURRENT_Y_SCALE = 'linear';
-            btn.disabled = !canLog;
+            btn.disabled = !RESULTS;
             btn.textContent = CURRENT_Y_SCALE === 'log' ? 'Escala linear' : 'Escala log';
-            btn.title = canLog
-                ? 'Alternar entre escala linear e logarítmica'
-                : 'Escala log indisponível: algumas trajetórias atingiram R$ 0 (retiradas esgotaram o portfólio). Log(0) é indefinido.';
+            btn.title = 'Alternar entre escala linear e logarítmica';
         }
 
         function toggleChartScale() {
             if (!RESULTS) return;
-            const stats = RESULTS[CURRENT_VIEW];
-            if (!stats || stats.min_path_value <= 0) return;
             CURRENT_Y_SCALE = CURRENT_Y_SCALE === 'linear' ? 'log' : 'linear';
             switchView(CURRENT_VIEW);
         }
@@ -1346,39 +1340,45 @@
         function renderChart(stats, params, view) {
             const t = stats.time_years;
             const lastX = t[t.length - 1];
-            const isLog = CURRENT_Y_SCALE === 'log' && stats.min_path_value > 0;
+            const isLog = CURRENT_Y_SCALE === 'log';
+            // In log mode, replace zero/negative values with null so Plotly skips them
+            const logSafe = (arr) => isLog ? arr.map(v => v > 0 ? v : null) : arr;
             const traces = [];
 
             // Sample trajectories
             const samples = stats.sample_trajectories.slice(0, 15);
             for (const s of samples) {
                 traces.push({
-                    x: t, y: s, mode: 'lines',
+                    x: t, y: logSafe(s), mode: 'lines',
                     line: { color: 'rgba(100, 116, 139, 0.12)', width: 0.8 },
                     showlegend: false, hoverinfo: 'skip',
                 });
             }
 
-            // Percentile bands (shaded)
+            // Percentile bands (shaded) — skip in log mode if values hit zero
             const p95 = stats.percentiles['95'];
             const p75 = stats.percentiles['75'];
             const p25 = stats.percentiles['25'];
             const p5 = stats.percentiles['5'];
 
-            traces.push({
-                x: t.concat([...t].reverse()),
-                y: p95.concat([...p5].reverse()),
-                fill: 'toself', fillcolor: 'rgba(34, 211, 238, 0.06)',
-                line: { color: 'transparent' },
-                showlegend: false, hoverinfo: 'skip', name: 'P5-P95',
-            });
-            traces.push({
-                x: t.concat([...t].reverse()),
-                y: p75.concat([...p25].reverse()),
-                fill: 'toself', fillcolor: 'rgba(34, 211, 238, 0.12)',
-                line: { color: 'transparent' },
-                showlegend: false, hoverinfo: 'skip', name: 'P25-P75',
-            });
+            if (!isLog || p5.every(v => v > 0)) {
+                traces.push({
+                    x: t.concat([...t].reverse()),
+                    y: logSafe(p95).concat([...logSafe(p5)].reverse()),
+                    fill: 'toself', fillcolor: 'rgba(34, 211, 238, 0.06)',
+                    line: { color: 'transparent' },
+                    showlegend: false, hoverinfo: 'skip', name: 'P5-P95',
+                });
+            }
+            if (!isLog || p25.every(v => v > 0)) {
+                traces.push({
+                    x: t.concat([...t].reverse()),
+                    y: logSafe(p75).concat([...logSafe(p25)].reverse()),
+                    fill: 'toself', fillcolor: 'rgba(34, 211, 238, 0.12)',
+                    line: { color: 'transparent' },
+                    showlegend: false, hoverinfo: 'skip', name: 'P25-P75',
+                });
+            }
 
             // Percentile lines with end labels
             const pctConfigs = [
@@ -1394,7 +1394,7 @@
                 const yValues = stats.percentiles[c.p];
                 const finalVal = yValues[yValues.length - 1];
                 traces.push({
-                    x: t, y: yValues,
+                    x: t, y: logSafe(yValues),
                     mode: 'lines',
                     line: { color: c.color, dash: c.dash, width: c.width },
                     name: c.name,
