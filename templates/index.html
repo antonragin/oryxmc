@@ -584,7 +584,8 @@
                             Fronteira Eficiente
                         </div>
                         <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">
-                            Clique em um ponto da fronteira para carregar o portfólio ótimo e simular automaticamente.
+                            Clique em um ponto da fronteira (linha contínua) para carregar o portfólio ótimo e simular.
+                            Linhas tracejadas mostram fronteiras da 1ª e 2ª metade do histórico — quanto mais próximas, mais estável o resultado.
                         </p>
                         <div class="chart-container" id="frontierChart" style="height: 350px;"></div>
                     </div>
@@ -1592,78 +1593,93 @@
         }
 
         let _frontierDebounce = null;
+        const FRONTIER_BASE_TRACES = 4; // full line, h1 line, h2 line, max-sharpe star
+
         function renderFrontierChart(view) {
             if (!FRONTIER_DATA) return;
-            const points = FRONTIER_DATA[view === 'nominal' ? 'nominal' : 'real'];
-            if (!points || !points.length) return;
+            const vk = view === 'nominal' ? 'nominal' : 'real';
+            const set = FRONTIER_DATA[vk];
+            if (!set || !set.full || !set.full.length) return;
 
-            const sharpes = points.map(p => p.sharpe);
-            const cagrs = points.map(p => p.cagr * 100);
+            const full = set.full;
+            const h1 = set.h1 || [];
+            const h2 = set.h2 || [];
+            const periods = FRONTIER_DATA.periods || {};
 
-            // Find max-Sharpe point
+            // Find max-Sharpe on full frontier
             let bestIdx = 0;
-            for (let i = 1; i < points.length; i++) {
-                if (points[i].sharpe > points[bestIdx].sharpe) bestIdx = i;
+            for (let i = 1; i < full.length; i++) {
+                if (full[i].sharpe > full[bestIdx].sharpe) bestIdx = i;
             }
+
+            const _alloc_str = (p) => Object.entries(p.allocations)
+                .sort((a, b) => b[1] - a[1])
+                .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%')
+                .join(', ');
 
             const traces = [];
 
-            // Frontier line
+            // Trace 0: Full frontier (clickable)
             traces.push({
-                x: sharpes, y: cagrs,
+                x: full.map(p => p.cagr * 100), y: full.map(p => p.sharpe),
                 mode: 'lines+markers',
-                line: { color: '#22d3ee', width: 2 },
-                marker: { size: 8, color: '#22d3ee', symbol: 'circle' },
-                customdata: points.map(p => [
-                    Object.entries(p.allocations)
-                        .sort((a, b) => b[1] - a[1])
-                        .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%')
-                        .join(', '),
-                    (p.vol * 100).toFixed(2) + '%',
-                ]),
-                hovertemplate: '<b>CAGR: %{y:.2f}%</b><br>Sharpe vs CDI: %{x:.3f}<br>Vol: %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
-                name: 'Fronteira Eficiente',
+                line: { color: '#22d3ee', width: 2.5 },
+                marker: { size: 6, color: '#22d3ee' },
+                customdata: full.map(p => [_alloc_str(p), (p.vol * 100).toFixed(2) + '%']),
+                hovertemplate: '<b>CAGR: %{x:.2f}%</b><br>Sharpe: %{y:.3f}<br>Vol: %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
+                name: 'Período completo',
             });
 
-            // Max Sharpe marker
+            // Trace 1: H1 frontier
             traces.push({
-                x: [sharpes[bestIdx]], y: [cagrs[bestIdx]],
+                x: h1.map(p => p.cagr * 100), y: h1.map(p => p.sharpe),
+                mode: 'lines',
+                line: { color: '#fb923c', width: 1.2, dash: 'dash' },
+                customdata: h1.map(p => [_alloc_str(p), (p.vol * 100).toFixed(2) + '%']),
+                hovertemplate: '<b>1ª metade</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<br>%{customdata[0]}<extra></extra>',
+                name: '1ª metade (' + (periods.h1 || '') + ')',
+            });
+
+            // Trace 2: H2 frontier
+            traces.push({
+                x: h2.map(p => p.cagr * 100), y: h2.map(p => p.sharpe),
+                mode: 'lines',
+                line: { color: '#a78bfa', width: 1.2, dash: 'dash' },
+                customdata: h2.map(p => [_alloc_str(p), (p.vol * 100).toFixed(2) + '%']),
+                hovertemplate: '<b>2ª metade</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<br>%{customdata[0]}<extra></extra>',
+                name: '2ª metade (' + (periods.h2 || '') + ')',
+            });
+
+            // Trace 3: Max Sharpe star
+            traces.push({
+                x: [full[bestIdx].cagr * 100], y: [full[bestIdx].sharpe],
                 mode: 'markers',
                 marker: { size: 14, color: '#facc15', symbol: 'star', line: { color: '#000', width: 1 } },
-                name: 'Max Sharpe (' + points[bestIdx].sharpe.toFixed(2) + ')',
-                hovertemplate: '<b>Max Sharpe</b><br>CAGR: %{y:.2f}%<br>Sharpe: %{x:.3f}<extra></extra>',
+                name: 'Max Sharpe (' + full[bestIdx].sharpe.toFixed(2) + ')',
+                hovertemplate: '<b>Max Sharpe</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
             });
-
-            const annotations = [{
-                x: sharpes[bestIdx], y: cagrs[bestIdx],
-                text: 'Max Sharpe', showarrow: true, arrowcolor: '#facc15',
-                font: { size: 10, color: '#facc15' }, ax: 30, ay: -25,
-                bgcolor: 'rgba(15,23,42,0.75)', borderpad: 2,
-            }];
 
             const viewLabel = view === 'nominal' ? 'Nominal' : 'Real (IPCA)';
             Plotly.react('frontierChart', traces, {
-                title: { text: 'Fronteira Eficiente — Retorno ' + viewLabel + ' vs. Sharpe', font: { size: 14, color: '#e2e8f0' }, x: 0.02 },
-                xaxis: { title: 'Sharpe vs CDI', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
-                yaxis: { title: 'CAGR Real (%)', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
+                title: { text: 'Fronteira Eficiente — CAGR ' + viewLabel + ' vs. Sharpe', font: { size: 14, color: '#e2e8f0' }, x: 0.02 },
+                xaxis: { title: 'CAGR (%)', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
+                yaxis: { title: 'Sharpe vs CDI', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
                 paper_bgcolor: 'transparent',
                 plot_bgcolor: 'transparent',
                 font: { family: 'Inter, sans-serif', color: '#94a3b8' },
                 margin: { t: 45, r: 20, b: 50, l: 55 },
                 legend: { x: 0.01, y: 0.99, bgcolor: 'rgba(30,41,59,0.8)', bordercolor: 'rgba(100,116,139,0.2)', borderwidth: 1, font: { size: 11 } },
-                annotations: annotations,
                 separators: ',.',
             }, PLOTLY_CONFIG);
 
-            // Click handler — load frontier portfolio and auto-run
+            // Click handler — only trace 0 (full frontier) loads portfolio
             const chartEl = document.getElementById('frontierChart');
             chartEl.removeAllListeners && chartEl.removeAllListeners('plotly_click');
             chartEl.on('plotly_click', function(eventData) {
                 if (RUNNING) return;
                 const pt = eventData.points[0];
-                if (pt.curveNumber !== 0) return; // only frontier line
-                const fpIdx = pt.pointIndex;
-                const fp = points[fpIdx];
+                if (pt.curveNumber !== 0) return; // only full frontier
+                const fp = full[pt.pointIndex];
                 if (!fp) return;
 
                 // Fill allocations — round to integers, fix remainder on largest weight
@@ -1678,23 +1694,20 @@
                 }
                 if (maxKey && roundedSum !== 100) rounded[maxKey] += (100 - roundedSum);
                 document.querySelectorAll('.alloc-input').forEach(inp => {
-                    const key = inp.dataset.key;
-                    inp.value = rounded[key] || 0;
+                    inp.value = rounded[inp.dataset.key] || 0;
                 });
                 updateTotal();
                 saveState();
-                // Auto-run simulation
                 setTimeout(() => { if (!document.getElementById('runBtn').disabled) runSimulation(); }, 50);
             });
 
-            // Update user portfolio dot
             updateFrontierDot(view);
         }
 
         function updateFrontierDot(view) {
             if (!FRONTIER_DATA) return;
             const chartEl = document.getElementById('frontierChart');
-            if (!chartEl || !chartEl.data || chartEl.data.length < 1) return;
+            if (!chartEl || !chartEl.data || chartEl.data.length < FRONTIER_BASE_TRACES) return;
 
             // Gather current allocations
             const allocs = {};
@@ -1704,12 +1717,12 @@
             });
             const total = Object.values(allocs).reduce((a, b) => a + b, 0);
             if (total < 0.5) {
-                // Remove user dot if present (trace index 2)
-                if (chartEl.data.length > 2) Plotly.deleteTraces('frontierChart', [2]);
+                // Remove user dots if present
+                while (chartEl.data.length > FRONTIER_BASE_TRACES)
+                    Plotly.deleteTraces('frontierChart', [FRONTIER_BASE_TRACES]);
                 return;
             }
 
-            // Debounce API call
             clearTimeout(_frontierDebounce);
             _frontierDebounce = setTimeout(async () => {
                 try {
@@ -1721,23 +1734,44 @@
                     if (!res.ok) return;
                     const data = await res.json();
                     const v = view || CURRENT_VIEW;
-                    const pt = v === 'nominal' ? data.nominal : data.real;
+                    const vk = v === 'nominal' ? 'nominal' : 'real';
+                    const ptFull = data[vk].full;
+                    const ptH1 = data[vk].h1;
+                    const ptH2 = data[vk].h2;
 
-                    const dotTrace = {
-                        x: [pt.sharpe], y: [pt.cagr * 100],
+                    // Remove old user traces
+                    while (chartEl.data.length > FRONTIER_BASE_TRACES)
+                        Plotly.deleteTraces('frontierChart', [FRONTIER_BASE_TRACES]);
+
+                    // Full period dot (large, red diamond)
+                    Plotly.addTraces('frontierChart', {
+                        x: [ptFull.cagr * 100], y: [ptFull.sharpe],
                         mode: 'markers+text',
                         marker: { size: 12, color: '#f87171', symbol: 'diamond', line: { color: '#fff', width: 1.5 } },
                         text: ['Seu Portfólio'],
                         textposition: 'top center',
                         textfont: { size: 10, color: '#f87171' },
                         name: 'Seu Portfólio',
-                        hovertemplate: '<b>Seu Portfólio</b><br>CAGR: %{y:.2f}%<br>Sharpe: %{x:.3f}<extra></extra>',
-                    };
-
-                    if (chartEl.data.length > 2) {
-                        Plotly.deleteTraces('frontierChart', [2]);
-                    }
-                    Plotly.addTraces('frontierChart', dotTrace);
+                        hovertemplate: '<b>Seu Portfólio (completo)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                    });
+                    // H1 dot (small, orange)
+                    Plotly.addTraces('frontierChart', {
+                        x: [ptH1.cagr * 100], y: [ptH1.sharpe],
+                        mode: 'markers',
+                        marker: { size: 8, color: '#fb923c', symbol: 'diamond-open', line: { width: 2 } },
+                        name: 'Seu Portfólio (1ª metade)',
+                        showlegend: false,
+                        hovertemplate: '<b>Seu Portfólio (1ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                    });
+                    // H2 dot (small, purple)
+                    Plotly.addTraces('frontierChart', {
+                        x: [ptH2.cagr * 100], y: [ptH2.sharpe],
+                        mode: 'markers',
+                        marker: { size: 8, color: '#a78bfa', symbol: 'diamond-open', line: { width: 2 } },
+                        name: 'Seu Portfólio (2ª metade)',
+                        showlegend: false,
+                        hovertemplate: '<b>Seu Portfólio (2ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                    });
                 } catch (e) { /* ignore */ }
             }, 300);
         }

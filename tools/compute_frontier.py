@@ -2,6 +2,11 @@
 
 Run after any change to historical data:
     python tools/compute_frontier.py
+
+Computes frontiers on three periods:
+  - full: entire historical window
+  - h1:   first half
+  - h2:   second half
 """
 import hashlib
 import json
@@ -12,127 +17,177 @@ import numpy as np
 from scipy.optimize import minimize
 
 DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "historical_returns.json"
+N_POINTS = 100
 
 
 def compute_data_checksum(data):
     """SHA-256 over sorted index returns + IPCA — deterministic."""
     h = hashlib.sha256()
-    # IPCA
     for m in sorted(data["ipca"]):
         h.update(f"ipca:{m}:{data['ipca'][m]:.10f}".encode())
-    # Index returns
     for key in sorted(data["indices"]):
         for m in sorted(data["indices"][key]["returns"]):
             h.update(f"{key}:{m}:{data['indices'][key]['returns'][m]:.10f}".encode())
     return "sha256:" + h.hexdigest()
 
 
-def compute_frontier(data, n_points=20):
-    """Compute efficient frontier (real + nominal) from historical data."""
+def _build_matrices(data, month_list):
+    """Build nominal and real return matrices for a given month list."""
+    index_keys = sorted(data["indices"].keys())
+    n_months = len(month_list)
+    n_idx = len(index_keys)
+    ipca_arr = np.array([data["ipca"][m] for m in month_list])
+
+    nominal = np.empty((n_months, n_idx))
+    real = np.empty((n_months, n_idx))
+    for j, key in enumerate(index_keys):
+        rets = data["indices"][key]["returns"]
+        for i, m in enumerate(month_list):
+            nom = rets.get(m, 0.0)
+            nominal[i, j] = nom
+            real[i, j] = (1.0 + nom) / (1.0 + ipca_arr[i]) - 1.0
+    return nominal, real
+
+
+def _optimize_frontier(returns, real_matrix_full, n_months_full, cdi_idx, index_keys,
+                       target_returns_monthly, n_points):
+    """Compute min-variance portfolios for given target monthly returns."""
+    mu = np.mean(returns, axis=0)
+    Sigma = np.cov(returns, rowvar=False)
+    cdi_mu_ann = mu[cdi_idx] * 12
+    n = len(index_keys)
+    bounds = [(0, 1)] * n
+
+    portfolios = []
+    prev_w = None
+
+    for target_monthly in target_returns_monthly:
+        cons = [
+            {"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
+            {"type": "ineq", "fun": lambda w, t=target_monthly: w.dot(mu) - t},
+        ]
+
+        best_w = None
+        best_var = np.inf
+
+        # Starting points
+        starts = [np.ones(n) / n]
+        w_cdi = np.zeros(n); w_cdi[cdi_idx] = 1.0; starts.append(w_cdi)
+        max_j = np.argmax(mu)
+        w_max = np.zeros(n); w_max[max_j] = 1.0; starts.append(w_max)
+        min_ret = mu[cdi_idx] * 12
+        max_ret = mu[max_j] * 12
+        if max_ret > min_ret:
+            frac = (target_monthly * 12 - min_ret) / (max_ret - min_ret)
+            frac = max(0, min(1, frac))
+            w_mix = np.zeros(n); w_mix[cdi_idx] = 1 - frac; w_mix[max_j] = frac
+            starts.append(w_mix)
+        if prev_w is not None:
+            starts.append(prev_w)
+
+        for w0 in starts:
+            try:
+                res = minimize(lambda w: w.dot(Sigma).dot(w), w0, method="SLSQP",
+                              bounds=bounds, constraints=cons,
+                              options={"ftol": 1e-14, "maxiter": 500})
+                if (res.success or res.fun < 1e10) and res.fun < best_var:
+                    best_var = res.fun
+                    best_w = res.x.copy()
+            except Exception:
+                pass
+
+        if best_w is not None:
+            w = best_w
+            prev_w = w.copy()
+            port_mu_ann = w.dot(mu) * 12
+            port_std_ann = np.sqrt(w.dot(Sigma).dot(w) * 12)
+            sharpe = (port_mu_ann - cdi_mu_ann) / port_std_ann if port_std_ann > 1e-8 else 0
+
+            # CAGR always from full real matrix
+            port_real = real_matrix_full.dot(w)
+            cum = np.prod(1.0 + port_real)
+            cagr = cum ** (12.0 / n_months_full) - 1.0
+
+            allocs = {index_keys[j]: round(float(w[j]), 4)
+                      for j in range(n) if w[j] > 0.005}
+            alloc_total = sum(allocs.values())
+            allocs = {k: round(v / alloc_total, 4) for k, v in allocs.items()}
+
+            portfolios.append({
+                "cagr": round(cagr, 6),
+                "vol": round(port_std_ann, 6),
+                "sharpe": round(sharpe, 4),
+                "allocations": allocs,
+            })
+        elif prev_w is not None:
+            # Reuse previous point if optimizer fails
+            portfolios.append(portfolios[-1])
+
+    return portfolios
+
+
+def compute_frontier(data, n_points=N_POINTS):
+    """Compute efficient frontier on full, first-half, and second-half periods."""
     target_start = data["metadata"]["target_start"]
     target_end = data["metadata"]["target_end"]
     months = sorted(m for m in data["ipca"] if target_start <= m <= target_end)
     n_months = len(months)
+    mid = n_months // 2
+
+    months_h1 = months[:mid]
+    months_h2 = months[mid:]
+    print(f"  Full: {months[0]}..{months[-1]} ({n_months} months)")
+    print(f"  H1:   {months_h1[0]}..{months_h1[-1]} ({len(months_h1)} months)")
+    print(f"  H2:   {months_h2[0]}..{months_h2[-1]} ({len(months_h2)} months)")
 
     index_keys = sorted(data["indices"].keys())
-    n_idx = len(index_keys)
     cdi_idx = index_keys.index("CDI")
 
-    ipca_arr = np.array([data["ipca"][m] for m in months])
+    nom_full, real_full = _build_matrices(data, months)
+    nom_h1, real_h1 = _build_matrices(data, months_h1)
+    nom_h2, real_h2 = _build_matrices(data, months_h2)
 
-    # Build returns matrices
-    nominal_matrix = np.empty((n_months, n_idx))
-    real_matrix = np.empty((n_months, n_idx))
-    for j, key in enumerate(index_keys):
-        rets = data["indices"][key]["returns"]
-        for i, m in enumerate(months):
-            nom = rets.get(m, 0.0)
-            nominal_matrix[i, j] = nom
-            real_matrix[i, j] = (1.0 + nom) / (1.0 + ipca_arr[i]) - 1.0
+    def _compute_set(returns_full, returns_h1, returns_h2, label):
+        # Determine target range from full-period data
+        mu_full = np.mean(returns_full, axis=0)
+        min_ret = mu_full[cdi_idx] * 12
+        max_ret = np.max(mu_full) * 12
+        targets_monthly = np.linspace(min_ret / 12, max_ret / 12, n_points)
 
-    def _compute_one_frontier(returns, label):
-        mu = np.mean(returns, axis=0)
-        Sigma = np.cov(returns, rowvar=False)
-        cdi_mu = mu[cdi_idx]
+        print(f"  {label} full...")
+        full = _optimize_frontier(returns_full, real_full, n_months, cdi_idx,
+                                  index_keys, targets_monthly, n_points)
+        print(f"    {len(full)} points")
 
-        max_idx_j = np.argmax(mu)
-        max_ret = mu[max_idx_j] * 12
-        min_ret = cdi_mu * 12
+        print(f"  {label} H1...")
+        h1 = _optimize_frontier(returns_h1, real_full, n_months, cdi_idx,
+                                index_keys, targets_monthly, n_points)
+        print(f"    {len(h1)} points")
 
-        n = n_idx
-        bounds = [(0, 1) for _ in range(n)]
-        targets = np.linspace(min_ret, max_ret, n_points)
-        portfolios = []
+        print(f"  {label} H2...")
+        h2 = _optimize_frontier(returns_h2, real_full, n_months, cdi_idx,
+                                index_keys, targets_monthly, n_points)
+        print(f"    {len(h2)} points")
 
-        for target_ann in targets:
-            target_monthly = target_ann / 12.0
-            cons = [
-                {"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
-                {"type": "ineq", "fun": lambda w, t=target_monthly: w.dot(mu) - t},
-            ]
+        return {"full": full, "h1": h1, "h2": h2}
 
-            best_w = None
-            best_var = np.inf
+    print("Computing real frontiers...")
+    real_set = _compute_set(real_full, real_h1, real_h2, "real")
 
-            starts = [np.ones(n) / n]
-            w_cdi = np.zeros(n); w_cdi[cdi_idx] = 1.0; starts.append(w_cdi)
-            w_max = np.zeros(n); w_max[max_idx_j] = 1.0; starts.append(w_max)
-            frac = (target_ann - min_ret) / (max_ret - min_ret) if max_ret > min_ret else 0
-            w_mix = np.zeros(n); w_mix[cdi_idx] = 1 - frac; w_mix[max_idx_j] = frac
-            starts.append(w_mix)
-
-            for w0 in starts:
-                try:
-                    res = minimize(lambda w: w.dot(Sigma).dot(w), w0, method="SLSQP",
-                                  bounds=bounds, constraints=cons,
-                                  options={"ftol": 1e-14, "maxiter": 500})
-                    if (res.success or res.fun < 1e10) and res.fun < best_var:
-                        best_var = res.fun
-                        best_w = res.x.copy()
-                except Exception:
-                    pass
-
-            if best_w is not None:
-                w = best_w
-                port_mu_ann = w.dot(mu) * 12
-                port_std_ann = np.sqrt(w.dot(Sigma).dot(w) * 12)
-                sharpe = (port_mu_ann - min_ret) / port_std_ann if port_std_ann > 1e-8 else 0
-
-                # CAGR from real returns (always)
-                port_real_monthly = real_matrix.dot(w)
-                cum = np.prod(1.0 + port_real_monthly)
-                cagr = cum ** (12.0 / n_months) - 1.0
-
-                allocs = {index_keys[j]: round(float(w[j]), 4)
-                          for j in range(n) if w[j] > 0.005}
-                # Normalize displayed allocations
-                alloc_total = sum(allocs.values())
-                allocs = {k: round(v / alloc_total, 4) for k, v in allocs.items()}
-
-                portfolios.append({
-                    "cagr": round(cagr, 6),
-                    "vol": round(port_std_ann, 6),
-                    "sharpe": round(sharpe, 4),
-                    "allocations": allocs,
-                })
-
-        return portfolios
-
-    print("Computing real frontier...")
-    real_frontier = _compute_one_frontier(real_matrix, "real")
-    print(f"  {len(real_frontier)} points")
-
-    print("Computing nominal frontier...")
-    nominal_frontier = _compute_one_frontier(nominal_matrix, "nominal")
-    print(f"  {len(nominal_frontier)} points")
+    print("Computing nominal frontiers...")
+    nom_set = _compute_set(nom_full, nom_h1, nom_h2, "nominal")
 
     checksum = compute_data_checksum(data)
     print(f"Data checksum: {checksum}")
 
     return {
         "data_checksum": checksum,
-        "real": real_frontier,
-        "nominal": nominal_frontier,
+        "periods": {
+            "h1": f"{months_h1[0]} a {months_h1[-1]}",
+            "h2": f"{months_h2[0]} a {months_h2[-1]}",
+        },
+        "real": real_set,
+        "nominal": nom_set,
     }
 
 
@@ -150,11 +205,12 @@ def main():
     size_mb = DATA_FILE.stat().st_size / 1024 / 1024
     print(f"\nWrote {DATA_FILE} ({size_mb:.2f} MB)")
     print(f"Checksum: {frontier['data_checksum']}")
-    print("\nReal frontier summary:")
-    for i, p in enumerate(frontier["real"]):
+    print(f"\nReal frontier summary (full, {len(frontier['real']['full'])} points):")
+    for i in range(0, len(frontier["real"]["full"]), 10):
+        p = frontier["real"]["full"][i]
         alloc_str = ", ".join(f"{k} {v*100:.0f}%" for k, v in
                               sorted(p["allocations"].items(), key=lambda x: -x[1])[:4])
-        print(f"  {i+1:>2}. CAGR={p['cagr']*100:.2f}% Vol={p['vol']*100:.2f}% Sharpe={p['sharpe']:.3f}  {alloc_str}")
+        print(f"  {i+1:>3}. CAGR={p['cagr']*100:.2f}% Sharpe={p['sharpe']:.3f}  {alloc_str}")
 
 
 if __name__ == "__main__":

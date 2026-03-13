@@ -329,14 +329,16 @@ def verify_frontier_checksum(data):
 
 
 def compute_portfolio_risk_return(data, allocations):
-    """Compute CAGR/vol/sharpe for an arbitrary portfolio (real + nominal).
+    """Compute CAGR/vol/sharpe for an arbitrary portfolio on full, h1, h2 periods.
 
-    Uses only numpy — no scipy needed. Returns dict with 'real' and 'nominal' keys.
+    Uses only numpy — no scipy needed. Returns dict with 'real' and 'nominal' keys,
+    each containing 'full', 'h1', 'h2' sub-dicts.
     """
     target_start = data["metadata"]["target_start"]
     target_end = data["metadata"]["target_end"]
     months = sorted(m for m in data["ipca"] if target_start <= m <= target_end)
     n_months = len(months)
+    mid = n_months // 2
 
     # Normalize allocations
     clean = {k: v for k, v in allocations.items() if v > 0}
@@ -345,7 +347,6 @@ def compute_portfolio_risk_return(data, allocations):
         return None
     clean = {k: v / total for k, v in clean.items()}
 
-    ipca_arr = np.array([data["ipca"][m] for m in months])
     index_keys = sorted(data["indices"].keys())
     cdi_idx = index_keys.index("CDI")
 
@@ -355,32 +356,52 @@ def compute_portfolio_risk_return(data, allocations):
         if k in index_keys:
             w[index_keys.index(k)] = v
 
-    # Build returns matrices
-    nominal_matrix = np.empty((n_months, len(index_keys)))
-    real_matrix = np.empty((n_months, len(index_keys)))
-    for j, key in enumerate(index_keys):
-        rets = data["indices"][key]["returns"]
-        for i, m in enumerate(months):
-            nom = rets.get(m, 0.0)
-            nominal_matrix[i, j] = nom
-            real_matrix[i, j] = (1.0 + nom) / (1.0 + ipca_arr[i]) - 1.0
+    def _build(month_list):
+        ipca = np.array([data["ipca"][m] for m in month_list])
+        nm = np.empty((len(month_list), len(index_keys)))
+        rm = np.empty_like(nm)
+        for j, key in enumerate(index_keys):
+            rets = data["indices"][key]["returns"]
+            for i, m in enumerate(month_list):
+                nom = rets.get(m, 0.0)
+                nm[i, j] = nom
+                rm[i, j] = (1.0 + nom) / (1.0 + ipca[i]) - 1.0
+        return nm, rm
 
-    def _stats(returns_matrix):
+    nom_full, real_full = _build(months)
+    nom_h1, real_h1 = _build(months[:mid])
+    nom_h2, real_h2 = _build(months[mid:])
+
+    def _stats(returns_matrix, real_mat_for_cagr, n_m):
         mu = np.mean(returns_matrix, axis=0)
         Sigma = np.cov(returns_matrix, rowvar=False)
         cdi_mu = mu[cdi_idx] * 12
         port_mu = w.dot(mu) * 12
         port_std = np.sqrt(w.dot(Sigma).dot(w) * 12)
         sharpe = (port_mu - cdi_mu) / port_std if port_std > 1e-8 else 0
-        # CAGR from real returns
-        port_monthly = real_matrix.dot(w)
+        port_monthly = real_mat_for_cagr.dot(w)
         cum = np.prod(1.0 + port_monthly)
-        cagr = cum ** (12.0 / n_months) - 1.0
+        cagr = cum ** (12.0 / n_m) - 1.0
         return {"cagr": round(cagr, 6), "vol": round(port_std, 6), "sharpe": round(sharpe, 4)}
 
+    def _all_periods(nom_matrices, real_matrices):
+        return {
+            "full": _stats(nom_matrices[0], real_matrices[0], n_months),
+            "h1": _stats(nom_matrices[1], real_matrices[1], mid),
+            "h2": _stats(nom_matrices[2], real_matrices[2], n_months - mid),
+        }
+
     return {
-        "real": _stats(real_matrix),
-        "nominal": _stats(nominal_matrix),
+        "real": {
+            "full": _stats(real_full, real_full, n_months),
+            "h1": _stats(real_h1, real_h1, mid),
+            "h2": _stats(real_h2, real_h2, n_months - mid),
+        },
+        "nominal": {
+            "full": _stats(nom_full, real_full, n_months),
+            "h1": _stats(nom_h1, real_h1, mid),
+            "h2": _stats(nom_h2, real_h2, n_months - mid),
+        },
     }
 
 
