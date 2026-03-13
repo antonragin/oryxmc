@@ -1662,7 +1662,7 @@
             const viewLabel = view === 'nominal' ? 'Nominal' : 'Real (IPCA)';
             Plotly.react('frontierChart', traces, {
                 title: { text: 'Fronteira Eficiente — CAGR ' + viewLabel + ' vs. Sharpe', font: { size: 14, color: '#e2e8f0' }, x: 0.02 },
-                xaxis: { title: 'CAGR (%)', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
+                xaxis: { title: 'CAGR ' + viewLabel + ' (%)', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
                 yaxis: { title: 'Sharpe vs CDI', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
                 paper_bgcolor: 'transparent',
                 plot_bgcolor: 'transparent',

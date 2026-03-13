@@ -372,24 +372,17 @@ def compute_portfolio_risk_return(data, allocations):
     nom_h1, real_h1 = _build(months[:mid])
     nom_h2, real_h2 = _build(months[mid:])
 
-    def _stats(returns_matrix, real_mat_for_cagr, n_m):
+    def _stats(returns_matrix, cagr_matrix, n_m):
         mu = np.mean(returns_matrix, axis=0)
         Sigma = np.cov(returns_matrix, rowvar=False)
         cdi_mu = mu[cdi_idx] * 12
         port_mu = w.dot(mu) * 12
         port_std = np.sqrt(w.dot(Sigma).dot(w) * 12)
         sharpe = (port_mu - cdi_mu) / port_std if port_std > 1e-8 else 0
-        port_monthly = real_mat_for_cagr.dot(w)
+        port_monthly = cagr_matrix.dot(w)
         cum = np.prod(1.0 + port_monthly)
         cagr = cum ** (12.0 / n_m) - 1.0
         return {"cagr": round(cagr, 6), "vol": round(port_std, 6), "sharpe": round(sharpe, 4)}
-
-    def _all_periods(nom_matrices, real_matrices):
-        return {
-            "full": _stats(nom_matrices[0], real_matrices[0], n_months),
-            "h1": _stats(nom_matrices[1], real_matrices[1], mid),
-            "h2": _stats(nom_matrices[2], real_matrices[2], n_months - mid),
-        }
 
     return {
         "real": {
@@ -398,9 +391,9 @@ def compute_portfolio_risk_return(data, allocations):
             "h2": _stats(real_h2, real_h2, n_months - mid),
         },
         "nominal": {
-            "full": _stats(nom_full, real_full, n_months),
-            "h1": _stats(nom_h1, real_h1, mid),
-            "h2": _stats(nom_h2, real_h2, n_months - mid),
+            "full": _stats(nom_full, nom_full, n_months),
+            "h1": _stats(nom_h1, nom_h1, mid),
+            "h2": _stats(nom_h2, nom_h2, n_months - mid),
         },
     }
 
