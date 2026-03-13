@@ -635,6 +635,10 @@
                         Clique em um ponto ou use ← → para navegar. Linhas tracejadas = 1ª e 2ª metade do histórico.
                     </p>
                     <div class="chart-container" id="frontierChart" style="height: 350px;"></div>
+                    <div style="display: flex; gap: 8px; margin-top: 6px;">
+                        <button type="button" class="preset-btn" id="pinPortfolioBtn" onclick="pinCurrentPortfolio()" disabled>Fixar portfólio no gráfico</button>
+                        <button type="button" class="preset-btn preset-clear" id="unpinPortfolioBtn" onclick="unpinPortfolio()" style="display:none;">Remover fixado</button>
+                    </div>
                     <div class="frontier-selected" id="frontierSelected">
                         <span class="fs-label">Selecione um ponto na fronteira</span>
                     </div>
@@ -851,6 +855,7 @@
             const btnDisabled = RUNNING || !valid || !comboValid;
             document.getElementById('runBtn').disabled = btnDisabled;
             document.getElementById('runBtnTop').disabled = btnDisabled;
+            document.getElementById('pinPortfolioBtn').disabled = !valid;
             // Update frontier dot if chart is visible
             if (FRONTIER_DATA && document.getElementById('frontierChart')?.data?.length) {
                 updateFrontierDot(CURRENT_VIEW);
@@ -1655,7 +1660,8 @@
         let _frontierDebounce = null;
         let _frontierSelectedIdx = -1;
         let _frontierView = 'real';
-        const FRONTIER_BASE_TRACES = 4; // full line, h1 line, h2 line, max-sharpe star
+        let _pinnedPortfolio = null; // {allocs, label, data: {real:{full,h1,h2}, nominal:{...}}}
+        let _frontierBaseTraces = 4; // updated dynamically when pinned traces are added
 
         function renderFrontierChart(view) {
             if (!FRONTIER_DATA) return;
@@ -1720,6 +1726,36 @@
                 name: 'Max Sharpe (' + full[bestIdx].sharpe.toFixed(2) + ')',
                 hovertemplate: '<b>Max Sharpe</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
             });
+
+            // Pinned portfolio (faded markers)
+            if (_pinnedPortfolio) {
+                const pd = _pinnedPortfolio.data[vk];
+                traces.push({
+                    x: [pd.full.cagr * 100], y: [pd.full.sharpe],
+                    mode: 'markers+text',
+                    marker: { size: 11, color: 'rgba(74,222,128,0.5)', symbol: 'square', line: { color: 'rgba(74,222,128,0.8)', width: 1.5 } },
+                    text: ['Fixado'], textposition: 'bottom center',
+                    textfont: { size: 9, color: 'rgba(74,222,128,0.7)' },
+                    name: 'Fixado',
+                    hovertemplate: '<b>Fixado</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<br>' + _pinnedPortfolio.label + '<extra></extra>',
+                });
+                traces.push({
+                    x: [pd.h1.cagr * 100], y: [pd.h1.sharpe],
+                    mode: 'markers',
+                    marker: { size: 7, color: 'rgba(74,222,128,0.3)', symbol: 'square-open', line: { width: 1.5 } },
+                    showlegend: false,
+                    hovertemplate: '<b>Fixado (1ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                });
+                traces.push({
+                    x: [pd.h2.cagr * 100], y: [pd.h2.sharpe],
+                    mode: 'markers',
+                    marker: { size: 7, color: 'rgba(74,222,128,0.3)', symbol: 'square-open', line: { width: 1.5 } },
+                    showlegend: false,
+                    hovertemplate: '<b>Fixado (2ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                });
+            }
+
+            _frontierBaseTraces = traces.length;
 
             const viewLabel = view === 'nominal' ? 'Nominal' : 'Real (IPCA)';
             Plotly.react('frontierChart', traces, {
@@ -1794,10 +1830,44 @@
             el.innerHTML = `<span class="fs-label">Ponto ${idx+1}/${full.length} — CAGR ${(fp.cagr*100).toFixed(2)}% · Sharpe ${fp.sharpe.toFixed(3)} · Vol ${(fp.vol*100).toFixed(2)}%</span><br>${allocs}`;
         }
 
+        function pinCurrentPortfolio() {
+            // Gather current allocations
+            const allocs = {};
+            document.querySelectorAll('.alloc-input').forEach(inp => {
+                const v = parseFloat(inp.value) || 0;
+                if (v > 0) allocs[inp.dataset.key] = v / 100;
+            });
+            const total = Object.values(allocs).reduce((a, b) => a + b, 0);
+            if (!isAllocationTotalValid(total * 100)) return;
+
+            // Fetch the point data and pin it
+            fetch('/api/portfolio-point', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allocations: allocs }),
+            }).then(r => r.json()).then(data => {
+                const allocStr = Object.entries(allocs)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%')
+                    .join(', ');
+                _pinnedPortfolio = { allocs, label: allocStr, data };
+                document.getElementById('unpinPortfolioBtn').style.display = '';
+                document.getElementById('pinPortfolioBtn').textContent = 'Atualizar fixado';
+                renderFrontierChart(_frontierView);
+            }).catch(() => {});
+        }
+
+        function unpinPortfolio() {
+            _pinnedPortfolio = null;
+            document.getElementById('unpinPortfolioBtn').style.display = 'none';
+            document.getElementById('pinPortfolioBtn').textContent = 'Fixar portfólio no gráfico';
+            renderFrontierChart(_frontierView);
+        }
+
         function updateFrontierDot(view) {
             if (!FRONTIER_DATA) return;
             const chartEl = document.getElementById('frontierChart');
-            if (!chartEl || !chartEl.data || chartEl.data.length < FRONTIER_BASE_TRACES) return;
+            if (!chartEl || !chartEl.data || chartEl.data.length < _frontierBaseTraces) return;
 
             // Gather current allocations
             const allocs = {};
@@ -1808,8 +1878,8 @@
             const total = Object.values(allocs).reduce((a, b) => a + b, 0);
             if (!isAllocationTotalValid(total * 100)) {
                 // Remove user dots if allocations invalid
-                while (chartEl.data.length > FRONTIER_BASE_TRACES)
-                    Plotly.deleteTraces('frontierChart', [FRONTIER_BASE_TRACES]);
+                while (chartEl.data.length > _frontierBaseTraces)
+                    Plotly.deleteTraces('frontierChart', [_frontierBaseTraces]);
                 return;
             }
 
@@ -1830,8 +1900,8 @@
                     const ptH2 = data[vk].h2;
 
                     // Remove old user traces
-                    while (chartEl.data.length > FRONTIER_BASE_TRACES)
-                        Plotly.deleteTraces('frontierChart', [FRONTIER_BASE_TRACES]);
+                    while (chartEl.data.length > _frontierBaseTraces)
+                        Plotly.deleteTraces('frontierChart', [_frontierBaseTraces]);
 
                     // Full period dot (large, red diamond)
                     Plotly.addTraces('frontierChart', {
