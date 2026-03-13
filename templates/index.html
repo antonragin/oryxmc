@@ -1226,6 +1226,9 @@
             if (!canLog && CURRENT_Y_SCALE === 'log') CURRENT_Y_SCALE = 'linear';
             btn.disabled = !canLog;
             btn.textContent = CURRENT_Y_SCALE === 'log' ? 'Escala linear' : 'Escala log';
+            btn.title = canLog
+                ? 'Alternar entre escala linear e logarítmica'
+                : 'Escala log indisponível: algumas trajetórias atingiram R$ 0 (retiradas esgotaram o portfólio). Log(0) é indefinido.';
         }
 
         function toggleChartScale() {
@@ -1594,16 +1597,8 @@
             const points = FRONTIER_DATA[view === 'nominal' ? 'nominal' : 'real'];
             if (!points || !points.length) return;
 
-            const vols = points.map(p => p.vol * 100);
+            const sharpes = points.map(p => p.sharpe);
             const cagrs = points.map(p => p.cagr * 100);
-            const labels = points.map((p, i) => {
-                const top = Object.entries(p.allocations)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 3)
-                    .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%')
-                    .join(', ');
-                return top;
-            });
 
             // Find max-Sharpe point
             let bestIdx = 0;
@@ -1615,7 +1610,7 @@
 
             // Frontier line
             traces.push({
-                x: vols, y: cagrs,
+                x: sharpes, y: cagrs,
                 mode: 'lines+markers',
                 line: { color: '#22d3ee', width: 2 },
                 marker: { size: 8, color: '#22d3ee', symbol: 'circle' },
@@ -1624,23 +1619,23 @@
                         .sort((a, b) => b[1] - a[1])
                         .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%')
                         .join(', '),
-                    p.sharpe.toFixed(3),
+                    (p.vol * 100).toFixed(2) + '%',
                 ]),
-                hovertemplate: '<b>CAGR: %{y:.2f}%</b><br>Vol: %{x:.2f}%<br>Sharpe: %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
+                hovertemplate: '<b>CAGR: %{y:.2f}%</b><br>Sharpe vs CDI: %{x:.3f}<br>Vol: %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
                 name: 'Fronteira Eficiente',
             });
 
             // Max Sharpe marker
             traces.push({
-                x: [vols[bestIdx]], y: [cagrs[bestIdx]],
+                x: [sharpes[bestIdx]], y: [cagrs[bestIdx]],
                 mode: 'markers',
                 marker: { size: 14, color: '#facc15', symbol: 'star', line: { color: '#000', width: 1 } },
                 name: 'Max Sharpe (' + points[bestIdx].sharpe.toFixed(2) + ')',
-                hovertemplate: '<b>Max Sharpe</b><br>CAGR: %{y:.2f}%<br>Vol: %{x:.2f}%<extra></extra>',
+                hovertemplate: '<b>Max Sharpe</b><br>CAGR: %{y:.2f}%<br>Sharpe: %{x:.3f}<extra></extra>',
             });
 
             const annotations = [{
-                x: vols[bestIdx], y: cagrs[bestIdx],
+                x: sharpes[bestIdx], y: cagrs[bestIdx],
                 text: 'Max Sharpe', showarrow: true, arrowcolor: '#facc15',
                 font: { size: 10, color: '#facc15' }, ax: 30, ay: -25,
                 bgcolor: 'rgba(15,23,42,0.75)', borderpad: 2,
@@ -1648,8 +1643,8 @@
 
             const viewLabel = view === 'nominal' ? 'Nominal' : 'Real (IPCA)';
             Plotly.react('frontierChart', traces, {
-                title: { text: 'Fronteira Eficiente — Retorno ' + viewLabel + ' vs. Volatilidade', font: { size: 14, color: '#e2e8f0' }, x: 0.02 },
-                xaxis: { title: 'Volatilidade Anual (%)', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
+                title: { text: 'Fronteira Eficiente — Retorno ' + viewLabel + ' vs. Sharpe', font: { size: 14, color: '#e2e8f0' }, x: 0.02 },
+                xaxis: { title: 'Sharpe vs CDI', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
                 yaxis: { title: 'CAGR Real (%)', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
                 paper_bgcolor: 'transparent',
                 plot_bgcolor: 'transparent',
@@ -1671,11 +1666,20 @@
                 const fp = points[fpIdx];
                 if (!fp) return;
 
-                // Fill allocations
+                // Fill allocations — round to integers, fix remainder on largest weight
+                const rounded = {};
+                let roundedSum = 0;
+                let maxKey = null, maxVal = 0;
+                for (const [k, v] of Object.entries(fp.allocations)) {
+                    const r = Math.round(v * 100);
+                    rounded[k] = r;
+                    roundedSum += r;
+                    if (v > maxVal) { maxVal = v; maxKey = k; }
+                }
+                if (maxKey && roundedSum !== 100) rounded[maxKey] += (100 - roundedSum);
                 document.querySelectorAll('.alloc-input').forEach(inp => {
                     const key = inp.dataset.key;
-                    const val = fp.allocations[key];
-                    inp.value = val ? Math.round(val * 100) : 0;
+                    inp.value = rounded[key] || 0;
                 });
                 updateTotal();
                 saveState();
@@ -1720,14 +1724,14 @@
                     const pt = v === 'nominal' ? data.nominal : data.real;
 
                     const dotTrace = {
-                        x: [pt.vol * 100], y: [pt.cagr * 100],
+                        x: [pt.sharpe], y: [pt.cagr * 100],
                         mode: 'markers+text',
                         marker: { size: 12, color: '#f87171', symbol: 'diamond', line: { color: '#fff', width: 1.5 } },
                         text: ['Seu Portfólio'],
                         textposition: 'top center',
                         textfont: { size: 10, color: '#f87171' },
                         name: 'Seu Portfólio',
-                        hovertemplate: '<b>Seu Portfólio</b><br>CAGR: %{y:.2f}%<br>Vol: %{x:.2f}%<extra></extra>',
+                        hovertemplate: '<b>Seu Portfólio</b><br>CAGR: %{y:.2f}%<br>Sharpe: %{x:.3f}<extra></extra>',
                     };
 
                     if (chartEl.data.length > 2) {
