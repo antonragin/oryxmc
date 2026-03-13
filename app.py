@@ -286,6 +286,17 @@ def api_simulate():
         if n_years not in ALLOWED_RUNS or n_trajectories not in ALLOWED_RUNS[n_years]:
             return jsonify({"error": "Combinação de horizonte e trajetórias não permitida neste servidor"}), 400
 
+        # Parse rebalance frequency
+        rebalance_months = 1
+        raw_rebal = params.get("rebalance_months")
+        if raw_rebal is not None:
+            try:
+                rebalance_months = int(raw_rebal)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Frequência de rebalanceamento inválida"}), 400
+            if rebalance_months not in (0, 1, 3, 12):
+                return jsonify({"error": "Frequência de rebalanceamento deve ser 0, 1, 3 ou 12"}), 400
+
         # Parse bootstrap mode
         bootstrap_mode = params.get("bootstrap_mode", "iid")
         if bootstrap_mode not in engine.BOOTSTRAP_MODES:
@@ -334,6 +345,14 @@ def api_simulate():
         # Build portfolio returns with substitution
         portfolio = engine.build_portfolio_returns(DATA, allocations)
 
+        # Build individual asset returns for non-monthly rebalancing
+        individual_returns = None
+        asset_weights = None
+        if rebalance_months != 1:
+            individual_returns, asset_weights = engine.build_individual_returns(
+                DATA, allocations, portfolio["months"]
+            )
+
         # Run simulation
         results = engine.run_monte_carlo(
             portfolio["portfolio_returns"],
@@ -347,6 +366,9 @@ def api_simulate():
             benchmark_name="CDI",
             bootstrap_mode=bootstrap_mode,
             block_size=block_size,
+            rebalance_months=rebalance_months,
+            individual_returns=individual_returns,
+            asset_weights=asset_weights,
         )
         results["warnings"] = portfolio["warnings"]
         results["params"]["seed"] = seed

@@ -229,6 +229,32 @@
             margin-top: 0;
             margin-bottom: 12px;
         }
+        .advanced-toggle {
+            display: block;
+            width: 100%;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 6px 12px;
+            cursor: pointer;
+            text-align: left;
+            margin: 8px 0;
+            transition: all 0.2s;
+        }
+        .advanced-toggle:hover { border-color: var(--accent); color: var(--accent); }
+        .frontier-selected {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            padding: 6px 8px;
+            background: rgba(15,23,42,0.4);
+            border-radius: 4px;
+            min-height: 18px;
+        }
+        .frontier-selected .fs-label { color: var(--text-muted); }
+        .frontier-selected .fs-alloc { color: var(--accent); }
 
         /* Results */
         .results-area { display: flex; flex-direction: column; gap: 20px; }
@@ -487,46 +513,64 @@
                             </select>
                         </div>
                         <div class="param-group">
-                            <label>Modo de Retirada</label>
-                            <select id="withdrawalMode" onchange="updateWithdrawalUI(); saveState()">
-                                <option value="fixed" selected>Valor fixo real (R$)</option>
-                                <option value="percent">% do valor inicial (SWR)</option>
-                            </select>
-                        </div>
-                        <div class="param-group" id="withdrawalFixedGroup">
-                            <label>Retirada Anual Real (R$)</label>
-                            <input type="number" id="withdrawal" value="0" min="0" max="1000000000000" step="10000" oninput="updateWithdrawalHint(); saveState()">
-                        </div>
-                        <div class="param-group" id="withdrawalPercentGroup" style="display:none;">
-                            <label>Taxa SWR (% a.a.)</label>
-                            <input type="number" id="withdrawalPercent" value="0" min="0" max="100" step="0.1" oninput="updateWithdrawalHint(); saveState()">
-                        </div>
-                        <div class="param-group">
                             <label>Trajetórias</label>
                             <select id="nTraj" onchange="updateTotal(); saveState()">
                                 <option value="10000">10.000</option>
                             </select>
                         </div>
-                        <div class="param-group">
-                            <label>Bootstrap</label>
-                            <select id="bootstrapMode" onchange="toggleBlockSize(); saveState()">
-                                <option value="iid" selected>Mensal (IID)</option>
-                                <option value="block">Blocos</option>
-                            </select>
-                        </div>
-                        <div class="param-group" id="blockSizeGroup" style="display:none;">
-                            <label>Tamanho do Bloco</label>
-                            <select id="blockSize" onchange="saveState()">
-                                <option value="6">6 meses</option>
-                                <option value="12" selected>12 meses</option>
-                            </select>
-                        </div>
-                        <div class="param-group">
-                            <label>Seed (opcional)</label>
-                            <input type="number" id="seed" min="0" max="9007199254740991" step="1" placeholder="Aleatória" oninput="saveState()">
-                        </div>
                     </div>
                     <div id="withdrawalHint" class="input-help" aria-live="polite" style="min-height: 16px;"></div>
+
+                    <!-- Advanced Options (collapsible) -->
+                    <button type="button" class="advanced-toggle" id="advancedBtn" onclick="toggleAdvanced()" aria-expanded="false">
+                        &#9660; Opções Avançadas
+                    </button>
+                    <div id="advancedOptions" style="display: none;">
+                        <div class="param-grid">
+                            <div class="param-group">
+                                <label>Modo de Retirada</label>
+                                <select id="withdrawalMode" onchange="updateWithdrawalUI(); saveState()">
+                                    <option value="fixed" selected>Valor fixo real (R$)</option>
+                                    <option value="percent">% do valor inicial (SWR)</option>
+                                </select>
+                            </div>
+                            <div class="param-group" id="withdrawalFixedGroup">
+                                <label>Retirada Anual Real (R$)</label>
+                                <input type="number" id="withdrawal" value="0" min="0" max="1000000000000" step="10000" oninput="updateWithdrawalHint(); saveState()">
+                            </div>
+                            <div class="param-group" id="withdrawalPercentGroup" style="display:none;">
+                                <label>Taxa SWR (% a.a.)</label>
+                                <input type="number" id="withdrawalPercent" value="0" min="0" max="100" step="0.1" oninput="updateWithdrawalHint(); saveState()">
+                            </div>
+                            <div class="param-group">
+                                <label>Rebalanceamento</label>
+                                <select id="rebalanceFreq" onchange="saveState()">
+                                    <option value="1" selected>Mensal</option>
+                                    <option value="3">Trimestral</option>
+                                    <option value="12">Anual</option>
+                                    <option value="0">Nunca (buy &amp; hold)</option>
+                                </select>
+                            </div>
+                            <div class="param-group">
+                                <label>Bootstrap</label>
+                                <select id="bootstrapMode" onchange="toggleBlockSize(); saveState()">
+                                    <option value="iid" selected>Mensal (IID)</option>
+                                    <option value="block">Blocos</option>
+                                </select>
+                            </div>
+                            <div class="param-group" id="blockSizeGroup" style="display:none;">
+                                <label>Tamanho do Bloco</label>
+                                <select id="blockSize" onchange="saveState()">
+                                    <option value="6">6 meses</option>
+                                    <option value="12" selected>12 meses</option>
+                                </select>
+                            </div>
+                            <div class="param-group">
+                                <label>Seed (opcional)</label>
+                                <input type="number" id="seed" min="0" max="9007199254740991" step="1" placeholder="Aleatória" oninput="saveState()">
+                            </div>
+                        </div>
+                    </div>
                     <button class="btn-run" id="runBtn" onclick="runSimulation()" disabled>
                         Executar Simulação
                     </button>
@@ -578,16 +622,21 @@
                         </div>
                         <div class="chart-container" id="histChart" style="height: 300px;"></div>
 
-                        <!-- Efficient Frontier -->
-                        <div class="card-title" style="margin-top: 20px;">
-                            <span class="icon">&#9670;</span>
-                            Fronteira Eficiente
-                        </div>
-                        <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">
-                            Clique em um ponto da fronteira (linha contínua) para carregar o portfólio ótimo e simular.
-                            Linhas tracejadas mostram fronteiras da 1ª e 2ª metade do histórico — quanto mais próximas, mais estável o resultado.
-                        </p>
-                        <div class="chart-container" id="frontierChart" style="height: 350px;"></div>
+                    </div>
+                </div>
+
+                <!-- Efficient Frontier (always visible) -->
+                <div class="card" id="frontierCard">
+                    <div class="card-title">
+                        <span class="icon">&#9670;</span>
+                        Fronteira Eficiente
+                    </div>
+                    <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">
+                        Clique em um ponto ou use ← → para navegar. Linhas tracejadas = 1ª e 2ª metade do histórico.
+                    </p>
+                    <div class="chart-container" id="frontierChart" style="height: 350px;"></div>
+                    <div class="frontier-selected" id="frontierSelected">
+                        <span class="fs-label">Selecione um ponto na fronteira</span>
                     </div>
                 </div>
             </div>
@@ -687,6 +736,7 @@
                 // Load frontier data in parallel
                 fetch('/api/frontier').then(r => r.json()).then(d => {
                     FRONTIER_DATA = d;
+                    renderFrontierChart(CURRENT_VIEW);
                 }).catch(() => {});
                 buildRunSelectors();
                 renderAllocationForm();
@@ -866,6 +916,15 @@
             document.getElementById('blockSizeGroup').style.display = mode === 'block' ? '' : 'none';
         }
 
+        function toggleAdvanced() {
+            const el = document.getElementById('advancedOptions');
+            const btn = document.getElementById('advancedBtn');
+            const open = el.style.display === 'none';
+            el.style.display = open ? '' : 'none';
+            btn.innerHTML = (open ? '&#9650; Opções Avançadas' : '&#9660; Opções Avançadas');
+            btn.setAttribute('aria-expanded', open);
+        }
+
         function updateWithdrawalUI({ persist = true } = {}) {
             const mode = document.getElementById('withdrawalMode').value;
             document.getElementById('withdrawalFixedGroup').style.display = mode === 'fixed' ? '' : 'none';
@@ -1042,6 +1101,7 @@
             };
             if (seedRaw) payload.seed = seedRaw;
             payload.bootstrap_mode = bootstrapMode;
+            payload.rebalance_months = parseInt(document.getElementById('rebalanceFreq').value, 10);
             if (bootstrapMode === 'block') {
                 payload.block_size = parseInt(document.getElementById('blockSize').value, 10);
             }
@@ -1593,6 +1653,8 @@
         }
 
         let _frontierDebounce = null;
+        let _frontierSelectedIdx = -1;
+        let _frontierView = 'real';
         const FRONTIER_BASE_TRACES = 4; // full line, h1 line, h2 line, max-sharpe star
 
         function renderFrontierChart(view) {
@@ -1672,36 +1734,64 @@
                 separators: ',.',
             }, PLOTLY_CONFIG);
 
+            _frontierView = view;
+
             // Click handler — only trace 0 (full frontier) loads portfolio
             const chartEl = document.getElementById('frontierChart');
             chartEl.removeAllListeners && chartEl.removeAllListeners('plotly_click');
             chartEl.on('plotly_click', function(eventData) {
                 if (RUNNING) return;
                 const pt = eventData.points[0];
-                if (pt.curveNumber !== 0) return; // only full frontier
-                const fp = full[pt.pointIndex];
-                if (!fp) return;
-
-                // Fill allocations — round to integers, fix remainder on largest weight
-                const rounded = {};
-                let roundedSum = 0;
-                let maxKey = null, maxVal = 0;
-                for (const [k, v] of Object.entries(fp.allocations)) {
-                    const r = Math.round(v * 100);
-                    rounded[k] = r;
-                    roundedSum += r;
-                    if (v > maxVal) { maxVal = v; maxKey = k; }
-                }
-                if (maxKey && roundedSum !== 100) rounded[maxKey] += (100 - roundedSum);
-                document.querySelectorAll('.alloc-input').forEach(inp => {
-                    inp.value = rounded[inp.dataset.key] || 0;
-                });
-                updateTotal();
-                saveState();
-                setTimeout(() => { if (!document.getElementById('runBtn').disabled) runSimulation(); }, 50);
+                if (pt.curveNumber !== 0) return;
+                selectFrontierPoint(pt.pointIndex);
             });
 
+            // Show previous selection if any
+            if (_frontierSelectedIdx >= 0 && _frontierSelectedIdx < full.length) {
+                showFrontierSelection(_frontierSelectedIdx);
+            }
             updateFrontierDot(view);
+        }
+
+        function selectFrontierPoint(idx) {
+            if (RUNNING || !FRONTIER_DATA) return;
+            const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
+            const full = FRONTIER_DATA[vk]?.full;
+            if (!full || idx < 0 || idx >= full.length) return;
+            const fp = full[idx];
+            _frontierSelectedIdx = idx;
+
+            // Fill allocations — round to integers, fix remainder on largest weight
+            const rounded = {};
+            let roundedSum = 0;
+            let maxKey = null, maxVal = 0;
+            for (const [k, v] of Object.entries(fp.allocations)) {
+                const r = Math.round(v * 100);
+                rounded[k] = r;
+                roundedSum += r;
+                if (v > maxVal) { maxVal = v; maxKey = k; }
+            }
+            if (maxKey && roundedSum !== 100) rounded[maxKey] += (100 - roundedSum);
+            document.querySelectorAll('.alloc-input').forEach(inp => {
+                inp.value = rounded[inp.dataset.key] || 0;
+            });
+            showFrontierSelection(idx);
+            updateTotal();
+            saveState();
+            setTimeout(() => { if (!document.getElementById('runBtn').disabled) runSimulation(); }, 50);
+        }
+
+        function showFrontierSelection(idx) {
+            const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
+            const full = FRONTIER_DATA?.[vk]?.full;
+            if (!full || idx < 0 || idx >= full.length) return;
+            const fp = full[idx];
+            const el = document.getElementById('frontierSelected');
+            const allocs = Object.entries(fp.allocations)
+                .sort((a, b) => b[1] - a[1])
+                .map(([k, v]) => `<span class="fs-alloc">${k} ${Math.round(v*100)}%</span>`)
+                .join(', ');
+            el.innerHTML = `<span class="fs-label">Ponto ${idx+1}/${full.length} — CAGR ${(fp.cagr*100).toFixed(2)}% · Sharpe ${fp.sharpe.toFixed(3)} · Vol ${(fp.vol*100).toFixed(2)}%</span><br>${allocs}`;
         }
 
         function updateFrontierDot(view) {
@@ -1716,8 +1806,8 @@
                 if (v > 0) allocs[inp.dataset.key] = v / 100;
             });
             const total = Object.values(allocs).reduce((a, b) => a + b, 0);
-            if (total < 0.5) {
-                // Remove user dots if present
+            if (!isAllocationTotalValid(total * 100)) {
+                // Remove user dots if allocations invalid
                 while (chartEl.data.length > FRONTIER_BASE_TRACES)
                     Plotly.deleteTraces('frontierChart', [FRONTIER_BASE_TRACES]);
                 return;
@@ -1786,7 +1876,7 @@
             btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
         }
 
-        // Enter key to run simulation
+        // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !RUNNING) {
                 const tag = document.activeElement?.tagName;
@@ -1795,6 +1885,20 @@
                     const btn = document.getElementById('runBtn');
                     if (!btn.disabled) runSimulation();
                 }
+            }
+            // Arrow keys: navigate frontier points
+            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !RUNNING && FRONTIER_DATA) {
+                const tag = document.activeElement?.tagName;
+                if (tag === 'INPUT' || tag === 'SELECT') return; // don't hijack input navigation
+                const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
+                const full = FRONTIER_DATA[vk]?.full;
+                if (!full || !full.length) return;
+                e.preventDefault();
+                let idx = _frontierSelectedIdx;
+                if (idx < 0) idx = 0;
+                else if (e.key === 'ArrowRight') idx = Math.min(idx + 1, full.length - 1);
+                else idx = Math.max(idx - 1, 0);
+                selectFrontierPoint(idx);
             }
         });
 

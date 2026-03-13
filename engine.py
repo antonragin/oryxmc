@@ -398,6 +398,29 @@ def compute_portfolio_risk_return(data, allocations):
     }
 
 
+def build_individual_returns(data, allocations, months):
+    """Build per-asset return matrix + weight vector for non-monthly rebalancing.
+
+    Returns (returns_matrix, weights) where:
+      returns_matrix: (n_months, n_assets) — monthly returns per asset
+      weights: (n_assets,) — target portfolio weights (normalized)
+    """
+    clean = {k: v for k, v in allocations.items() if v > 0}
+    total = sum(clean.values())
+    clean = {k: v / total for k, v in clean.items()}
+
+    keys = sorted(clean.keys())
+    weights = np.array([clean[k] for k in keys])
+
+    returns_matrix = np.empty((len(months), len(keys)))
+    for j, key in enumerate(keys):
+        rets = data["indices"][key]["returns"]
+        for i, m in enumerate(months):
+            returns_matrix[i, j] = rets.get(m, 0.0)
+
+    return returns_matrix, weights
+
+
 def _sample_block_indices(rng, n_hist, n_months, n_trajectories, block_size):
     """Moving-block bootstrap: sample contiguous blocks with wrap-around."""
     n_blocks = math.ceil(n_months / block_size)
@@ -415,7 +438,9 @@ BLOCK_SIZES = (6, 12)
 def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
                     n_trajectories=10000, withdrawal_annual=0.0, seed=None,
                     benchmark_returns=None, benchmark_name=None,
-                    bootstrap_mode="iid", block_size=12):
+                    bootstrap_mode="iid", block_size=12,
+                    rebalance_months=1, individual_returns=None,
+                    asset_weights=None):
     """
     Run Monte Carlo simulation using bootstrap resampling.
 
@@ -462,6 +487,30 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
     # using .copy() liberally and avoiding patterns known to trigger the bug.
     # Fancy indexing always creates a new independent array — no .copy() needed
     sampled_returns = portfolio_returns[sampled_idx]
+
+    # Non-monthly rebalancing: recompute portfolio returns with weight drift
+    if rebalance_months != 1 and individual_returns is not None and asset_weights is not None:
+        indiv = np.asarray(individual_returns, dtype=float)  # (n_hist, n_assets)
+        w_target = np.asarray(asset_weights, dtype=float)    # (n_assets,)
+        n_assets = indiv.shape[1]
+        rebal_period = rebalance_months if rebalance_months > 0 else n_months + 1  # 0 = never
+
+        # Current weights per trajectory: (n_traj, n_assets)
+        w_cur = np.tile(w_target, (n_trajectories, 1))
+        for t in range(n_months):
+            if t > 0 and rebal_period > 0 and t % rebal_period == 0:
+                w_cur[:] = w_target  # rebalance
+            # Get this month's per-asset returns for each trajectory
+            month_asset_rets = indiv[sampled_idx[:, t]]  # (n_traj, n_assets)
+            # Portfolio return this month
+            sampled_returns[:, t] = np.sum(w_cur * month_asset_rets, axis=1)
+            # Drift weights
+            growth = w_cur * (1.0 + month_asset_rets)
+            total_growth = np.sum(growth, axis=1, keepdims=True)
+            total_growth = np.maximum(total_growth, 1e-15)
+            w_cur = growth / total_growth
+        del w_cur
+
     sampled_ipca = ipca[sampled_idx]
 
     # Real returns: (1+r)/(1+i) - 1 = expm1(log1p(r) - log1p(i))
@@ -669,6 +718,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             "benchmark_name": benchmark_name,
             "bootstrap_mode": bootstrap_mode,
             "block_size": block_size if bootstrap_mode == "block" else None,
+            "rebalance_months": rebalance_months,
         },
         "nominal": nominal_stats,
         "real": real_stats,
