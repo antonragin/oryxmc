@@ -482,6 +482,11 @@
                         <button class="preset-btn preset-clear" onclick="applyPreset('clear')">Limpar</button>
                     </div>
 
+                    <div class="total-bar" id="totalBarTop" style="margin-top: 0; padding-top: 0; border-top: none;">
+                        <span>Total</span>
+                        <span class="total-value" id="totalAllocTop">0%</span>
+                    </div>
+
                     <button class="btn-run btn-run-top" id="runBtnTop" onclick="runSimulation()" disabled>
                         Executar Simulação
                     </button>
@@ -639,6 +644,7 @@
                         <button type="button" class="preset-btn" id="pinPortfolioBtn" onclick="pinCurrentPortfolio()" disabled>Fixar portfólio no gráfico</button>
                         <button type="button" class="preset-btn preset-clear" id="unpinPortfolioBtn" onclick="unpinPortfolio()" style="display:none;">Remover fixado</button>
                     </div>
+                    <div class="frontier-selected" id="pinnedInfo" style="display:none;"></div>
                     <div class="frontier-selected" id="frontierSelected">
                         <span class="fs-label">Selecione um ponto na fronteira</span>
                     </div>
@@ -851,15 +857,14 @@
                 el.textContent = total.toFixed(1).replace('.', ',') + '% (excede ' + Math.abs(remaining).toFixed(1).replace('.', ',') + '%)';
             }
             el.className = 'total-value ' + (valid ? 'ok' : 'err');
+            const elTop = document.getElementById('totalAllocTop');
+            elTop.textContent = el.textContent;
+            elTop.className = el.className;
             const comboValid = isRunComboValid();
             const btnDisabled = RUNNING || !valid || !comboValid;
             document.getElementById('runBtn').disabled = btnDisabled;
             document.getElementById('runBtnTop').disabled = btnDisabled;
             document.getElementById('pinPortfolioBtn').disabled = !valid;
-            // Update frontier dot if chart is visible
-            if (FRONTIER_DATA && document.getElementById('frontierChart')?.data?.length) {
-                updateFrontierDot(CURRENT_VIEW);
-            }
         }
 
         function isRunComboValid() {
@@ -1191,6 +1196,7 @@
                 LAST_RUN_SIGNATURE = currentFormSignature();
                 setStaleResultsNote('');
                 renderResults();
+                saveCurrentPortfolioDot();
             } catch (e) {
                 errEl.textContent = 'Erro na simulação: ' + e.message;
                 errEl.style.display = 'block';
@@ -1661,6 +1667,7 @@
         let _frontierSelectedIdx = -1;
         let _frontierView = 'real';
         let _pinnedPortfolio = null; // {allocs, label, data: {real:{full,h1,h2}, nominal:{...}}}
+        let _lastSimulatedDot = null; // {data: {real:{full,h1,h2}, nominal:{...}}}
         let _frontierBaseTraces = 4; // updated dynamically when pinned traces are added
 
         function renderFrontierChart(view) {
@@ -1786,7 +1793,8 @@
             if (_frontierSelectedIdx >= 0 && _frontierSelectedIdx < full.length) {
                 showFrontierSelection(_frontierSelectedIdx);
             }
-            updateFrontierDot(view);
+            updatePinnedInfo();
+            drawFrontierDot();
         }
 
         function selectFrontierPoint(idx) {
@@ -1853,6 +1861,7 @@
                 _pinnedPortfolio = { allocs, label: allocStr, data };
                 document.getElementById('unpinPortfolioBtn').style.display = '';
                 document.getElementById('pinPortfolioBtn').textContent = 'Atualizar fixado';
+                updatePinnedInfo();
                 renderFrontierChart(_frontierView);
             }).catch(() => {});
         }
@@ -1861,79 +1870,79 @@
             _pinnedPortfolio = null;
             document.getElementById('unpinPortfolioBtn').style.display = 'none';
             document.getElementById('pinPortfolioBtn').textContent = 'Fixar portfólio no gráfico';
+            document.getElementById('pinnedInfo').style.display = 'none';
             renderFrontierChart(_frontierView);
         }
 
-        function updateFrontierDot(view) {
-            if (!FRONTIER_DATA) return;
-            const chartEl = document.getElementById('frontierChart');
-            if (!chartEl || !chartEl.data || chartEl.data.length < _frontierBaseTraces) return;
+        function updatePinnedInfo() {
+            const el = document.getElementById('pinnedInfo');
+            if (!_pinnedPortfolio) { el.style.display = 'none'; return; }
+            const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
+            const pt = _pinnedPortfolio.data[vk].full;
+            el.style.display = '';
+            el.innerHTML = '<span class="fs-label" style="color:#4ade80;">&#9632; Fixado — CAGR '
+                + (pt.cagr * 100).toFixed(2) + '% · Sharpe ' + pt.sharpe.toFixed(3)
+                + ' · Vol ' + (pt.vol * 100).toFixed(2) + '%</span><br>'
+                + '<span class="fs-alloc" style="color:rgba(74,222,128,0.8);">' + _pinnedPortfolio.label + '</span>';
+        }
 
-            // Gather current allocations
+        function saveCurrentPortfolioDot() {
+            // Called after simulation or frontier click — save the current allocations as the dot
             const allocs = {};
             document.querySelectorAll('.alloc-input').forEach(inp => {
                 const v = parseFloat(inp.value) || 0;
                 if (v > 0) allocs[inp.dataset.key] = v / 100;
             });
             const total = Object.values(allocs).reduce((a, b) => a + b, 0);
-            if (!isAllocationTotalValid(total * 100)) {
-                // Remove user dots if allocations invalid
-                while (chartEl.data.length > _frontierBaseTraces)
-                    Plotly.deleteTraces('frontierChart', [_frontierBaseTraces]);
-                return;
-            }
+            if (!isAllocationTotalValid(total * 100)) return;
 
-            clearTimeout(_frontierDebounce);
-            _frontierDebounce = setTimeout(async () => {
-                try {
-                    const res = await fetch('/api/portfolio-point', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ allocations: allocs }),
-                    });
-                    if (!res.ok) return;
-                    const data = await res.json();
-                    const v = view || CURRENT_VIEW;
-                    const vk = v === 'nominal' ? 'nominal' : 'real';
-                    const ptFull = data[vk].full;
-                    const ptH1 = data[vk].h1;
-                    const ptH2 = data[vk].h2;
+            fetch('/api/portfolio-point', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allocations: allocs }),
+            }).then(r => r.json()).then(data => {
+                _lastSimulatedDot = { data };
+                drawFrontierDot();
+            }).catch(() => {});
+        }
 
-                    // Remove old user traces
-                    while (chartEl.data.length > _frontierBaseTraces)
-                        Plotly.deleteTraces('frontierChart', [_frontierBaseTraces]);
+        function drawFrontierDot() {
+            const chartEl = document.getElementById('frontierChart');
+            if (!chartEl || !chartEl.data || chartEl.data.length < _frontierBaseTraces) return;
 
-                    // Full period dot (large, red diamond)
-                    Plotly.addTraces('frontierChart', {
-                        x: [ptFull.cagr * 100], y: [ptFull.sharpe],
-                        mode: 'markers+text',
-                        marker: { size: 12, color: '#f87171', symbol: 'diamond', line: { color: '#fff', width: 1.5 } },
-                        text: ['Seu Portfólio'],
-                        textposition: 'top center',
-                        textfont: { size: 10, color: '#f87171' },
-                        name: 'Seu Portfólio',
-                        hovertemplate: '<b>Seu Portfólio (completo)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
-                    });
-                    // H1 dot (small, orange)
-                    Plotly.addTraces('frontierChart', {
-                        x: [ptH1.cagr * 100], y: [ptH1.sharpe],
-                        mode: 'markers',
-                        marker: { size: 8, color: '#fb923c', symbol: 'diamond-open', line: { width: 2 } },
-                        name: 'Seu Portfólio (1ª metade)',
-                        showlegend: false,
-                        hovertemplate: '<b>Seu Portfólio (1ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
-                    });
-                    // H2 dot (small, purple)
-                    Plotly.addTraces('frontierChart', {
-                        x: [ptH2.cagr * 100], y: [ptH2.sharpe],
-                        mode: 'markers',
-                        marker: { size: 8, color: '#a78bfa', symbol: 'diamond-open', line: { width: 2 } },
-                        name: 'Seu Portfólio (2ª metade)',
-                        showlegend: false,
-                        hovertemplate: '<b>Seu Portfólio (2ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
-                    });
-                } catch (e) { /* ignore */ }
-            }, 300);
+            // Remove old user traces
+            while (chartEl.data.length > _frontierBaseTraces)
+                Plotly.deleteTraces('frontierChart', [_frontierBaseTraces]);
+
+            if (!_lastSimulatedDot) return;
+            const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
+            const ptFull = _lastSimulatedDot.data[vk].full;
+            const ptH1 = _lastSimulatedDot.data[vk].h1;
+            const ptH2 = _lastSimulatedDot.data[vk].h2;
+
+            Plotly.addTraces('frontierChart', {
+                x: [ptFull.cagr * 100], y: [ptFull.sharpe],
+                mode: 'markers+text',
+                marker: { size: 12, color: '#f87171', symbol: 'diamond', line: { color: '#fff', width: 1.5 } },
+                text: ['Seu Portfólio'], textposition: 'top center',
+                textfont: { size: 10, color: '#f87171' },
+                name: 'Seu Portfólio',
+                hovertemplate: '<b>Seu Portfólio (completo)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+            });
+            Plotly.addTraces('frontierChart', {
+                x: [ptH1.cagr * 100], y: [ptH1.sharpe],
+                mode: 'markers',
+                marker: { size: 8, color: '#fb923c', symbol: 'diamond-open', line: { width: 2 } },
+                showlegend: false,
+                hovertemplate: '<b>Seu Portfólio (1ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+            });
+            Plotly.addTraces('frontierChart', {
+                x: [ptH2.cagr * 100], y: [ptH2.sharpe],
+                mode: 'markers',
+                marker: { size: 8, color: '#a78bfa', symbol: 'diamond-open', line: { width: 2 } },
+                showlegend: false,
+                hovertemplate: '<b>Seu Portfólio (2ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+            });
         }
 
         function toggleMethodology() {
