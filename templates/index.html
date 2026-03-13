@@ -128,6 +128,19 @@
             color: var(--orange);
             margin-left: 4px;
         }
+        .alloc-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: -4px;
+            margin-bottom: 4px;
+            padding-left: 2px;
+            line-height: 1.3;
+        }
+        .alloc-backfill {
+            font-size: 10px;
+            color: var(--orange);
+            opacity: 0.85;
+        }
         .alloc-input {
             width: 70px;
             padding: 6px 8px;
@@ -211,6 +224,10 @@
         .btn-run:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+        }
+        .btn-run-top {
+            margin-top: 0;
+            margin-bottom: 12px;
         }
 
         /* Results */
@@ -396,7 +413,7 @@
             #chart { height: 320px !important; }
             #histChart { height: 240px !important; }
             #methodologyContent { columns: 1 !important; }
-            .btn-run { position: sticky; bottom: 12px; z-index: 5; }
+            #runBtn { position: sticky; bottom: 12px; z-index: 5; }
             .stats-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
             .stat-value { font-size: 17px; }
         }
@@ -430,6 +447,10 @@
                         <button class="preset-btn" onclick="normalizeAllocations()">Normalizar 100%</button>
                         <button class="preset-btn" onclick="applyPreset('clear')">Limpar</button>
                     </div>
+
+                    <button class="btn-run btn-run-top" id="runBtnTop" onclick="runSimulation()" disabled>
+                        Executar Simulação
+                    </button>
 
                     <div id="allocationForm"></div>
 
@@ -608,6 +629,30 @@
             intl_reits: 'REITs Internacionais',
         };
 
+        const INDEX_DESCRIPTIONS = {
+            'CDI': 'Taxa interbancária — referência para renda fixa brasileira',
+            'IMA-B': 'Títulos públicos indexados à inflação (NTN-B), todos os vencimentos',
+            'IMA-B 5': 'Títulos públicos indexados à inflação com vencimento até 5 anos',
+            'IMA-B 5+': 'Títulos públicos indexados à inflação com vencimento acima de 5 anos',
+            'IRF-M': 'Títulos públicos prefixados (LTN e NTN-F), todos os vencimentos',
+            'IDA-DI': 'Debêntures corporativas indexadas ao CDI',
+            'IDA-IPCA': 'Debêntures corporativas indexadas à inflação',
+            'IDA-Infra': 'Debêntures de infraestrutura incentivadas (isentas de IR para PF)',
+            'Ibovespa': 'Principais ações da bolsa brasileira (~80 empresas)',
+            'IBX': 'As 100 ações mais negociadas da bolsa brasileira',
+            'IDIV': 'Ações brasileiras com maiores dividendos',
+            'IFIX': 'Fundos imobiliários listados na bolsa brasileira',
+            'SP500TR': 'As 500 maiores empresas das bolsas americanas',
+            'ACWI': 'Ações de 23 mercados desenvolvidos + 24 emergentes (~3.000 empresas)',
+            'URTH': 'Ações de mercados desenvolvidos (~1.500 empresas em 23 países)',
+            'EEM': 'Ações de mercados emergentes (~1.400 empresas em 24 países)',
+            'AGG': 'Títulos de renda fixa americanos (governo + corporativo, investment grade)',
+            'SHY': 'Títulos do tesouro americano de curto prazo (1-3 anos)',
+            'TLT': 'Títulos do tesouro americano de longo prazo (20+ anos)',
+            'VNQ': 'Fundos imobiliários (REITs) dos Estados Unidos',
+            'HYG': 'Títulos corporativos americanos de alto rendimento (high yield)',
+        };
+
         async function init() {
             try {
                 const res = await fetch('/api/indices');
@@ -671,17 +716,26 @@
                 if (!catIndices.length) continue;
                 html += `<div class="category"><div class="category-label">${CATEGORY_NAMES[cat]}</div>`;
                 for (const idx of catIndices) {
-                    const shortHist = !idx.has_full_history ?
-                        `<span class="short-hist" title="${escapeHtml('Cobertura: ' + idx.coverage_pct + '% — disponível desde ' + idx.start_date)}">&#9679; ${escapeHtml(idx.coverage_pct)}%</span>` : '';
+                    let backfillNote = '';
+                    if (idx.backfill && idx.backfill.synthetic_months > 0) {
+                        const ns = idx.backfill.native_start;
+                        const [y, m] = ns.split('-');
+                        const fmtDate = m + '/' + y;
+                        backfillNote = `<span class="alloc-backfill"> · dados reais desde ${fmtDate}, sintético antes</span>`;
+                    }
+                    const desc = INDEX_DESCRIPTIONS[idx.key] || '';
                     html += `
                         <div class="alloc-row">
-                            <span class="alloc-name" title="${escapeHtml(idx.desc)}">${escapeHtml(idx.name)}${shortHist}</span>
+                            <span class="alloc-name" title="${escapeHtml(idx.desc)}">${escapeHtml(idx.name)}${backfillNote}</span>
                             <input class="alloc-input" type="number" id="alloc_${escapeHtml(idx.key)}"
-                                   data-key="${escapeHtml(idx.key)}" value="0" min="0" max="100" step="0.1"
+                                   data-key="${escapeHtml(idx.key)}" value="0" min="0" max="100" step="5"
                                    inputmode="decimal" aria-label="Alocação em ${escapeHtml(idx.name)}"
                                    oninput="updateTotal(); saveState()">
                             <span class="alloc-pct">%</span>
                         </div>`;
+                    if (desc) {
+                        html += `<div class="alloc-desc">${escapeHtml(desc)}</div>`;
+                    }
                 }
                 html += '</div>';
             }
@@ -719,7 +773,9 @@
             }
             el.className = 'total-value ' + (valid ? 'ok' : 'err');
             const comboValid = isRunComboValid();
-            document.getElementById('runBtn').disabled = RUNNING || !valid || !comboValid;
+            const btnDisabled = RUNNING || !valid || !comboValid;
+            document.getElementById('runBtn').disabled = btnDisabled;
+            document.getElementById('runBtnTop').disabled = btnDisabled;
         }
 
         function isRunComboValid() {
@@ -909,9 +965,16 @@
             document.getElementById('seed').disabled = disabled;
         }
 
+        function setRunButtons(disabled, html) {
+            for (const id of ['runBtn', 'runBtnTop']) {
+                const b = document.getElementById(id);
+                b.disabled = disabled;
+                if (html !== undefined) b.innerHTML = html;
+            }
+        }
+
         async function runSimulation() {
             if (RUNNING) return;
-            const btn = document.getElementById('runBtn');
             const errEl = document.getElementById('errorMsg');
             errEl.style.display = 'none';
 
@@ -973,8 +1036,7 @@
             }
 
             RUNNING = true;
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span>Simulando...';
+            setRunButtons(true, '<span class="spinner"></span>Simulando...');
             setFormDisabled(true);
 
             const resultsContent = document.getElementById('resultsContent');
@@ -1046,8 +1108,7 @@
                 }
             } finally {
                 RUNNING = false;
-                btn.disabled = false;
-                btn.innerHTML = 'Executar Simulação';
+                setRunButtons(false, 'Executar Simulação');
                 setFormDisabled(false);
                 resultsContent.style.opacity = '1';
                 resultsContent.style.pointerEvents = '';

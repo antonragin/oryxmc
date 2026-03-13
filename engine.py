@@ -142,12 +142,13 @@ def get_available_indices(data):
     target_end = data["metadata"]["target_end"]
     target_months_set = {m for m in data["ipca"] if target_start <= m <= target_end}
     target_months = len(target_months_set)
+    regression = data.get("metadata", {}).get("regression_backfill", {})
     indices = []
     for key, info in data["indices"].items():
         # Count months this index actually has within the target window
         months_in_window = sum(1 for m in info["returns"] if m in target_months_set)
         missing_in_window = target_months - months_in_window
-        indices.append({
+        entry = {
             "key": key,
             "name": info["name"],
             "desc": info["desc"],
@@ -160,7 +161,18 @@ def get_available_indices(data):
             "start_date": info["start_date"],
             "end_date": info["end_date"],
             "has_full_history": months_in_window >= target_months,
-        })
+        }
+        # Add regression backfill info if applicable
+        if key in regression:
+            reg = regression[key]
+            synth_count = reg.get("synthetic_months", 0)
+            all_months = sorted(info["returns"].keys())
+            native_start = all_months[synth_count] if synth_count < len(all_months) else all_months[0]
+            entry["backfill"] = {
+                "native_start": native_start,
+                "synthetic_months": synth_count,
+            }
+        indices.append(entry)
     return indices
 
 
