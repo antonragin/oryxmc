@@ -50,7 +50,7 @@ QUANTUM_INDICES = {
     "IDA-IPCA": {"quantum_name": "IDA-IPCA",  "category": "br_fixed_income",
                  "name": "IDA-IPCA",          "desc": "Índice de Debêntures ANBIMA - IPCA"},
     "IDA-Infra": {"quantum_name": "IDA-IPCA Infraestrutura", "category": "br_fixed_income",
-                  "name": "IDA-IPCA Infraestrutura", "desc": "Debêntures Infraestrutura IPCA"},
+                  "name": "IDA-IPCA Infraestrutura", "desc": "Debêntures de Infraestrutura indexadas ao IPCA"},
     "Ibovespa": {"quantum_name": "Ibovespa",  "category": "br_equities",
                  "name": "Ibovespa",          "desc": "Índice Bovespa"},
     "IBX":      {"quantum_name": "IBX",       "category": "br_equities",
@@ -60,27 +60,27 @@ QUANTUM_INDICES = {
     "IFIX":     {"quantum_name": "IFIX",      "category": "br_reits",
                  "name": "IFIX",              "desc": "Índice de Fundos Imobiliários"},
     "SP500TR":  {"quantum_name": "S&P 500 Total Return", "category": "intl_equities",
-                 "name": "S&P 500 TR",        "desc": "S&P 500 Total Return em BRL"},
+                 "name": "S&P 500 Total Return", "desc": "Índice S&P 500 retorno total em BRL"},
     "EEM":      {"quantum_name": "EEM",       "category": "intl_equities",
-                 "name": "EEM",               "desc": "iShares MSCI Emerging Markets em BRL"},
+                 "name": "MSCI Emerging Markets", "desc": "Índice MSCI Mercados Emergentes em BRL"},
     "URTH":     {"quantum_name": "URTH",      "category": "intl_equities",
-                 "name": "URTH",              "desc": "iShares MSCI World em BRL"},
+                 "name": "MSCI World",        "desc": "Índice MSCI World em BRL"},
     "ACWI":     {"quantum_name": "ACWI",      "category": "intl_equities",
-                 "name": "ACWI",              "desc": "iShares MSCI ACWI em BRL"},
+                 "name": "MSCI ACWI",         "desc": "Índice MSCI All Country World em BRL"},
     "AGG":      {"quantum_name": "AGG",       "category": "intl_fixed_income",
-                 "name": "AGG",               "desc": "iShares Core US Aggregate Bond em BRL"},
+                 "name": "Bloomberg US Agg Bond", "desc": "Índice Bloomberg US Aggregate Bond em BRL"},
     "SHY":      {"quantum_name": "SHY",       "category": "intl_fixed_income",
-                 "name": "SHY",               "desc": "iShares 1-3 Year Treasury Bond em BRL"},
+                 "name": "US Treasury 1-3 Anos", "desc": "Índice Barclays US Treasury 1-3 Year em BRL"},
     "TLT":      {"quantum_name": "TLT",       "category": "intl_fixed_income",
-                 "name": "TLT",               "desc": "iShares 20+ Year Treasury Bond em BRL"},
+                 "name": "US Treasury 20+ Anos", "desc": "Índice Barclays US Treasury 20+ Year em BRL"},
     "VNQ":      {"quantum_name": "VNQ",       "category": "intl_reits",
-                 "name": "VNQ",               "desc": "Vanguard Real Estate ETF em BRL"},
+                 "name": "US REITs (MSCI)",   "desc": "Índice MSCI US REIT em BRL"},
 }
 
 # Yahoo-only indices (monthly from Yahoo, not available on Quantum as long series)
 YAHOO_INDICES = {
     "HYG": {"ticker": "HYG", "category": "intl_fixed_income",
-            "name": "US High Yield",  "desc": "iShares iBoxx $ High Yield Corporate Bond em BRL"},
+            "name": "US High Yield Bond", "desc": "Índice iBoxx $ High Yield Corporate Bond em BRL"},
 }
 
 # International ETFs that need Yahoo monthly data to supplement Quantum
