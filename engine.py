@@ -493,6 +493,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
             bench_final = bench_trajectories[:, -1]
             stats["prob_beat_benchmark"] = float(np.mean(final > bench_final) * 100)
             stats["benchmark_final_median"] = float(np.median(bench_final))
+            stats["benchmark_median_path"] = np.median(bench_trajectories, axis=0).tolist()
             if sampled_bench is not None and sampled_rets.shape[1] > 1:
                 excess = sampled_rets - sampled_bench
                 excess_mean = np.mean(excess, axis=1)
@@ -511,6 +512,7 @@ def run_monte_carlo(portfolio_returns, ipca, initial_value, n_years,
         else:
             stats["prob_beat_benchmark"] = None
             stats["benchmark_final_median"] = None
+            stats["benchmark_median_path"] = None
             stats["median_sharpe_vs_benchmark"] = None
 
         if has_withdrawals:

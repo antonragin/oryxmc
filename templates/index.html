@@ -403,6 +403,14 @@
             color: var(--accent);
         }
         .preset-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .preset-clear {
+            border-color: rgba(248, 113, 113, 0.4);
+            color: #f87171;
+        }
+        .preset-clear:hover {
+            border-color: #f87171;
+            color: #f87171;
+        }
 
         /* Mobile */
         @media (max-width: 640px) {
@@ -445,7 +453,7 @@
                         <button class="preset-btn" onclick="applyPreset('aggressive')">Agressivo</button>
                         <button class="preset-btn" onclick="applyPreset('global')">Global Diversificado</button>
                         <button class="preset-btn" onclick="normalizeAllocations()">Normalizar 100%</button>
-                        <button class="preset-btn" onclick="applyPreset('clear')">Limpar</button>
+                        <button class="preset-btn preset-clear" onclick="applyPreset('clear')">Limpar</button>
                     </div>
 
                     <button class="btn-run btn-run-top" id="runBtnTop" onclick="runSimulation()" disabled>
@@ -716,25 +724,26 @@
                 if (!catIndices.length) continue;
                 html += `<div class="category"><div class="category-label">${CATEGORY_NAMES[cat]}</div>`;
                 for (const idx of catIndices) {
-                    let backfillNote = '';
+                    const desc = INDEX_DESCRIPTIONS[idx.key] || '';
+                    let descLine = desc ? escapeHtml(desc) : '';
                     if (idx.backfill && idx.backfill.synthetic_months > 0) {
                         const ns = idx.backfill.native_start;
                         const [y, m] = ns.split('-');
                         const fmtDate = m + '/' + y;
-                        backfillNote = `<span class="alloc-backfill"> · dados reais desde ${fmtDate}, sintético antes</span>`;
+                        const bfText = `<span class="alloc-backfill">Dados reais desde ${fmtDate}, sintético antes</span>`;
+                        descLine = descLine ? descLine + ' · ' + bfText : bfText;
                     }
-                    const desc = INDEX_DESCRIPTIONS[idx.key] || '';
                     html += `
                         <div class="alloc-row">
-                            <span class="alloc-name" title="${escapeHtml(idx.desc)}">${escapeHtml(idx.name)}${backfillNote}</span>
+                            <span class="alloc-name" title="${escapeHtml(idx.desc)}">${escapeHtml(idx.name)}</span>
                             <input class="alloc-input" type="number" id="alloc_${escapeHtml(idx.key)}"
                                    data-key="${escapeHtml(idx.key)}" value="0" min="0" max="100" step="5"
                                    inputmode="decimal" aria-label="Alocação em ${escapeHtml(idx.name)}"
                                    oninput="updateTotal(); saveState()">
                             <span class="alloc-pct">%</span>
                         </div>`;
-                    if (desc) {
-                        html += `<div class="alloc-desc">${escapeHtml(desc)}</div>`;
+                    if (descLine) {
+                        html += `<div class="alloc-desc">${descLine}</div>`;
                     }
                 }
                 html += '</div>';
@@ -1387,6 +1396,37 @@
                 name: 'Valor Inicial',
                 hoverinfo: 'skip',
             });
+
+            // CDI benchmark median path (dotted yellow) — skip if portfolio is CDI-only
+            const isCdiOnly = (() => {
+                const allocs = {};
+                document.querySelectorAll('.alloc-input').forEach(inp => {
+                    const v = parseFloat(inp.value) || 0;
+                    if (v > 0) allocs[inp.dataset.key] = v;
+                });
+                const keys = Object.keys(allocs);
+                return keys.length === 1 && keys[0] === 'CDI';
+            })();
+            if (stats.benchmark_median_path && params.benchmark_name && !isCdiOnly) {
+                const bmPath = stats.benchmark_median_path;
+                const bmFinal = bmPath[bmPath.length - 1];
+                traces.push({
+                    x: t, y: bmPath,
+                    mode: 'lines',
+                    line: { color: '#facc15', dash: 'dot', width: 2 },
+                    name: 'CDI (mediana)',
+                    customdata: bmPath.map(v => [fmtBRLFull(v), fmtPct(v / params.initial_value - 1)]),
+                    hovertemplate: '<b>CDI (mediana)</b><br>Ano %{x:.1f}<br>Valor: %{customdata[0]}<br>vs. inicial: %{customdata[1]}<extra></extra>',
+                });
+                endAnnotations.push({
+                    x: lastX, y: bmFinal, xref: 'x', yref: 'y',
+                    text: 'CDI ' + fmtBRL(bmFinal),
+                    showarrow: false, xanchor: 'left', xshift: 8,
+                    font: { size: 11, color: '#facc15' },
+                    bgcolor: 'rgba(15,23,42,0.75)',
+                    bordercolor: 'rgba(100,116,139,0.15)', borderpad: 2,
+                });
+            }
 
             const step = params.n_years > 30 ? 5 : (params.n_years >= 15 ? 2 : 1);
             const yearTicks = [];
