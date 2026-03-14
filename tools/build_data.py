@@ -46,7 +46,8 @@ QUANTUM_INDICES = {
     "IRF-M":    {"quantum_name": "IRF-M",     "category": "br_fixed_income",
                  "name": "IRF-M",             "desc": "Índice de Renda Fixa de Mercado - LTN/NTN-F"},
     "IDA-DI":   {"quantum_name": "IDA-DI",    "category": "br_fixed_income",
-                 "name": "IDA-DI",            "desc": "Índice de Debêntures ANBIMA - DI"},
+                 "name": "TEVA-DI / IDA-DI",  "desc": "Índice Teva Debêntures DI (desde 2016-06), IDA-DI antes",
+                 "teva_quantum_name": "Índice Teva Debêntures DI"},
     "IDA-IPCA": {"quantum_name": "IDA-IPCA",  "category": "br_fixed_income",
                  "name": "IDA-IPCA",          "desc": "Índice de Debêntures ANBIMA - IPCA"},
     "IDA-Infra": {"quantum_name": "IDA-IPCA Infraestrutura", "category": "br_fixed_income",
@@ -509,6 +510,23 @@ def build(dry_run=False):
         else:
             all_monthly[key] = yahoo_brl
             print(f"  {key}: {len(yahoo_brl)} months (Yahoo only)")
+
+    # Merge TEVA Debêntures DI into IDA-DI (TEVA preferred where available)
+    teva_name = QUANTUM_INDICES.get("IDA-DI", {}).get("teva_quantum_name")
+    if teva_name:
+        teva_series = download_quantum_returns(client, teva_name, "monthly")
+        teva_series = teva_series[(teva_series.index >= TARGET_START) &
+                                  (teva_series.index <= TARGET_END)]
+        if not teva_series.empty and "IDA-DI" in all_monthly:
+            ida_before = all_monthly["IDA-DI"].copy()
+            # TEVA preferred, IDA-DI fills gaps
+            merged = teva_series.copy()
+            for m in ida_before.index:
+                if m not in merged.index:
+                    merged[m] = ida_before[m]
+            all_monthly["IDA-DI"] = merged.sort_index()
+            print(f"  IDA-DI: merged {len(teva_series)} TEVA + "
+                  f"{len(merged) - len(teva_series)} IDA-DI = {len(merged)} months")
 
     # Filter all to target window
     for key in list(all_monthly.keys()):
