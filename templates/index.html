@@ -1807,22 +1807,15 @@
                 if (cn === 0) {
                     selectFrontierPoint(pt.pointIndex);
                 } else {
-                    const periodLabel = cn === 1 ? '1ª metade' : '2ª metade';
                     selectFrontierPointFromAllocations(fp.allocations);
-                    // Show the composition in the panel
-                    const el = document.getElementById('frontierSelected');
-                    el.innerHTML = `<span class="fs-label">${periodLabel} — CAGR ${(fp.cagr*100).toFixed(2)}% · Sharpe ${fp.sharpe.toFixed(3)} · Vol ${(fp.vol*100).toFixed(2)}%</span>`
-                        + allocTable(fp.allocations);
                 }
             });
 
-            // Show previous selection or last-simulated portfolio
-            if (_frontierSelectedIdx >= 0 && _frontierSelectedIdx < full.length) {
-                showFrontierSelection(_frontierSelectedIdx);
-            } else if (_lastSimulatedDot) {
+            // Restore last-simulated portfolio info
+            if (_lastSimulatedDot) {
                 const pt = _lastSimulatedDot.data[vk].full;
                 const el = document.getElementById('frontierSelected');
-                el.innerHTML = `<span class="fs-label">Seu Portfólio — CAGR ${(pt.cagr*100).toFixed(2)}% · Sharpe ${pt.sharpe.toFixed(3)} · Vol ${(pt.vol*100).toFixed(2)}%</span>`
+                el.innerHTML = `<span class="fs-label">Último simulado — CAGR ${(pt.cagr*100).toFixed(2)}% · Sharpe ${pt.sharpe.toFixed(3)} · Vol ${(pt.vol*100).toFixed(2)}%</span>`
                     + allocTable(_lastSimulatedDot.allocs);
             }
             updatePinnedInfo();
@@ -1859,20 +1852,8 @@
             const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
             const full = FRONTIER_DATA[vk]?.full;
             if (!full || idx < 0 || idx >= full.length) return;
-            selectFrontierPointFromAllocations(full[idx].allocations);
-            // Re-set after updateTotal clears it
             _frontierSelectedIdx = idx;
-            showFrontierSelection(idx);
-        }
-
-        function showFrontierSelection(idx) {
-            const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
-            const full = FRONTIER_DATA?.[vk]?.full;
-            if (!full || idx < 0 || idx >= full.length) return;
-            const fp = full[idx];
-            const el = document.getElementById('frontierSelected');
-            el.innerHTML = `<span class="fs-label">Ponto ${idx+1}/${full.length} — CAGR ${(fp.cagr*100).toFixed(2)}% · Sharpe ${fp.sharpe.toFixed(3)} · Vol ${(fp.vol*100).toFixed(2)}%</span>`
-                + allocTable(fp.allocations);
+            selectFrontierPointFromAllocations(full[idx].allocations);
         }
 
         function pinCurrentPortfolio() {
@@ -1944,7 +1925,7 @@
                 const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
                 const pt = data[vk].full;
                 const el = document.getElementById('frontierSelected');
-                el.innerHTML = `<span class="fs-label">Seu Portfólio — CAGR ${(pt.cagr*100).toFixed(2)}% · Sharpe ${pt.sharpe.toFixed(3)} · Vol ${(pt.vol*100).toFixed(2)}%</span>`
+                el.innerHTML = `<span class="fs-label">Último simulado — CAGR ${(pt.cagr*100).toFixed(2)}% · Sharpe ${pt.sharpe.toFixed(3)} · Vol ${(pt.vol*100).toFixed(2)}%</span>`
                     + allocTable(allocs);
             }).catch(() => {});
         }
