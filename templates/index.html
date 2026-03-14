@@ -636,9 +636,14 @@
                         <span class="icon">&#9670;</span>
                         Fronteira Eficiente
                     </div>
-                    <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">
-                        Clique em um ponto ou use ← → para navegar. Linhas tracejadas = 1ª e 2ª metade do histórico.
-                    </p>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <p style="font-size: 11px; color: var(--text-muted); margin: 0;">
+                            Clique em um ponto ou use ← → para navegar.
+                        </p>
+                        <button type="button" class="chart-scale-toggle" onclick="toggleFrontierYAxis()">
+                            <span id="frontierYLabel">Eixo Y: Sharpe</span>
+                        </button>
+                    </div>
                     <div class="chart-container" id="frontierChart" style="height: 350px;"></div>
                     <div style="display: flex; gap: 8px; margin-top: 6px;">
                         <button type="button" class="preset-btn" id="pinPortfolioBtn" onclick="pinCurrentPortfolio()" disabled>Fixar portfólio no gráfico</button>
@@ -1681,8 +1686,16 @@
         let _frontierSelectedIdx = -1;
         let _frontierView = 'real';
         let _pinnedPortfolio = null; // {allocs, label, data: {real:{full,h1,h2}, nominal:{...}}}
-        let _lastSimulatedDot = null; // {data: {real:{full,h1,h2}, nominal:{...}}}
+        let _lastSimulatedDot = null; // {data: {real:{full,h1,h2}, nominal:{...}}, allocs}
+        let _frontierYAxis = 'sharpe'; // 'sharpe' or 'vol'
         let _frontierBaseTraces = 4; // updated dynamically when pinned traces are added
+
+        function toggleFrontierYAxis() {
+            _frontierYAxis = _frontierYAxis === 'sharpe' ? 'vol' : 'sharpe';
+            document.getElementById('frontierYLabel').textContent =
+                _frontierYAxis === 'sharpe' ? 'Eixo Y: Sharpe' : 'Eixo Y: Volatilidade';
+            renderFrontierChart(_frontierView);
+        }
 
         function renderFrontierChart(view) {
             if (!FRONTIER_DATA) return;
@@ -1701,6 +1714,13 @@
                 if (full[i].sharpe > full[bestIdx].sharpe) bestIdx = i;
             }
 
+            const isSharpe = _frontierYAxis === 'sharpe';
+            const _yVal = (p) => isSharpe ? p.sharpe : p.vol * 100;
+            const _yFmt = isSharpe ? '%{y:.3f}' : '%{y:.2f}%';
+            const _yHoverLabel = isSharpe ? 'Sharpe' : 'Vol';
+            const _otherLabel = isSharpe ? 'Vol' : 'Sharpe';
+            const _otherVal = (p) => isSharpe ? (p.vol * 100).toFixed(2) + '%' : p.sharpe.toFixed(3);
+
             const _alloc_hover = (p) => Object.entries(p.allocations)
                 .sort((a, b) => b[1] - a[1])
                 .map(([k, v]) => idxName(k) + ': ' + Math.round(v * 100) + '%')
@@ -1710,79 +1730,80 @@
 
             // Trace 0: Full frontier (clickable)
             traces.push({
-                x: full.map(p => p.cagr * 100), y: full.map(p => p.sharpe),
+                x: full.map(p => p.cagr * 100), y: full.map(_yVal),
                 mode: 'lines+markers',
                 line: { color: '#22d3ee', width: 2.5 },
                 marker: { size: 6, color: '#22d3ee' },
-                customdata: full.map(p => [_alloc_hover(p), (p.vol * 100).toFixed(2) + '%']),
-                hovertemplate: '<b>CAGR: %{x:.2f}%</b><br>Sharpe: %{y:.3f}<br>Vol: %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
+                customdata: full.map(p => [_alloc_hover(p), _otherVal(p)]),
+                hovertemplate: '<b>CAGR: %{x:.2f}%</b><br>' + _yHoverLabel + ': ' + _yFmt + '<br>' + _otherLabel + ': %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
                 name: 'Período completo',
             });
 
             // Trace 1: H1 frontier
             traces.push({
-                x: h1.map(p => p.cagr * 100), y: h1.map(p => p.sharpe),
+                x: h1.map(p => p.cagr * 100), y: h1.map(_yVal),
                 mode: 'lines',
                 line: { color: '#fb923c', width: 1.2, dash: 'dash' },
-                customdata: h1.map(p => [_alloc_hover(p), (p.vol * 100).toFixed(2) + '%']),
-                hovertemplate: '<b>1ª metade</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<br>%{customdata[0]}<extra></extra>',
+                customdata: h1.map(p => [_alloc_hover(p), _otherVal(p)]),
+                hovertemplate: '<b>1ª metade</b><br>CAGR: %{x:.2f}%<br>' + _yHoverLabel + ': ' + _yFmt + '<br>' + _otherLabel + ': %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
                 name: '1ª metade (' + (periods.h1 || '') + ')',
             });
 
             // Trace 2: H2 frontier
             traces.push({
-                x: h2.map(p => p.cagr * 100), y: h2.map(p => p.sharpe),
+                x: h2.map(p => p.cagr * 100), y: h2.map(_yVal),
                 mode: 'lines',
                 line: { color: '#a78bfa', width: 1.2, dash: 'dash' },
-                customdata: h2.map(p => [_alloc_hover(p), (p.vol * 100).toFixed(2) + '%']),
-                hovertemplate: '<b>2ª metade</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<br>%{customdata[0]}<extra></extra>',
+                customdata: h2.map(p => [_alloc_hover(p), _otherVal(p)]),
+                hovertemplate: '<b>2ª metade</b><br>CAGR: %{x:.2f}%<br>' + _yHoverLabel + ': ' + _yFmt + '<br>' + _otherLabel + ': %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
                 name: '2ª metade (' + (periods.h2 || '') + ')',
             });
 
             // Trace 3: Max Sharpe star
             traces.push({
-                x: [full[bestIdx].cagr * 100], y: [full[bestIdx].sharpe],
+                x: [full[bestIdx].cagr * 100], y: [_yVal(full[bestIdx])],
                 mode: 'markers',
                 marker: { size: 14, color: '#facc15', symbol: 'star', line: { color: '#000', width: 1 } },
                 name: 'Max Sharpe (' + full[bestIdx].sharpe.toFixed(2) + ')',
-                hovertemplate: '<b>Max Sharpe</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                hovertemplate: '<b>Max Sharpe</b><br>CAGR: %{x:.2f}%<br>' + _yHoverLabel + ': ' + _yFmt + '<extra></extra>',
             });
 
             // Pinned portfolio (faded markers)
             if (_pinnedPortfolio) {
                 const pd = _pinnedPortfolio.data[vk];
                 traces.push({
-                    x: [pd.full.cagr * 100], y: [pd.full.sharpe],
+                    x: [pd.full.cagr * 100], y: [_yVal(pd.full)],
                     mode: 'markers+text',
                     marker: { size: 11, color: 'rgba(74,222,128,0.5)', symbol: 'square', line: { color: 'rgba(74,222,128,0.8)', width: 1.5 } },
                     text: ['Fixado'], textposition: 'bottom center',
                     textfont: { size: 9, color: 'rgba(74,222,128,0.7)' },
                     name: 'Fixado',
-                    hovertemplate: '<b>Fixado</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<br>' + _pinnedPortfolio.label + '<extra></extra>',
+                    hovertemplate: '<b>Fixado</b><br>CAGR: %{x:.2f}%<br>' + _yHoverLabel + ': ' + _yFmt + '<br>' + _pinnedPortfolio.label + '<extra></extra>',
                 });
                 traces.push({
-                    x: [pd.h1.cagr * 100], y: [pd.h1.sharpe],
+                    x: [pd.h1.cagr * 100], y: [_yVal(pd.h1)],
                     mode: 'markers',
                     marker: { size: 7, color: 'rgba(74,222,128,0.3)', symbol: 'square-open', line: { width: 1.5 } },
                     showlegend: false,
-                    hovertemplate: '<b>Fixado (1ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                    hovertemplate: '<b>Fixado (1ª metade)</b><br>CAGR: %{x:.2f}%<br>' + _yHoverLabel + ': ' + _yFmt + '<extra></extra>',
                 });
                 traces.push({
-                    x: [pd.h2.cagr * 100], y: [pd.h2.sharpe],
+                    x: [pd.h2.cagr * 100], y: [_yVal(pd.h2)],
                     mode: 'markers',
                     marker: { size: 7, color: 'rgba(74,222,128,0.3)', symbol: 'square-open', line: { width: 1.5 } },
                     showlegend: false,
-                    hovertemplate: '<b>Fixado (2ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                    hovertemplate: '<b>Fixado (2ª metade)</b><br>CAGR: %{x:.2f}%<br>' + _yHoverLabel + ': ' + _yFmt + '<extra></extra>',
                 });
             }
 
             _frontierBaseTraces = traces.length;
 
             const viewLabel = view === 'nominal' ? 'Nominal' : 'Real (IPCA)';
+            const yTitle = isSharpe ? 'Sharpe vs CDI' : 'Volatilidade Anual (%)';
             Plotly.react('frontierChart', traces, {
-                title: { text: 'Fronteira Eficiente — CAGR ' + viewLabel + ' vs. Sharpe', font: { size: 14, color: '#e2e8f0' }, x: 0.02 },
+                title: { text: 'Fronteira Eficiente — CAGR ' + viewLabel + ' vs. ' + (isSharpe ? 'Sharpe' : 'Volatilidade'), font: { size: 14, color: '#e2e8f0' }, x: 0.02 },
                 xaxis: { title: 'CAGR ' + viewLabel + ' (%)', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
-                yaxis: { title: 'Sharpe vs CDI', color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
+                yaxis: { title: yTitle, color: '#94a3b8', gridcolor: 'rgba(100,116,139,0.15)' },
                 paper_bgcolor: 'transparent',
                 plot_bgcolor: 'transparent',
                 font: { family: 'Inter, sans-serif', color: '#94a3b8' },
@@ -1940,32 +1961,36 @@
 
             if (!_lastSimulatedDot) return;
             const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
+            const isSh = _frontierYAxis === 'sharpe';
+            const _dyVal = (p) => isSh ? p.sharpe : p.vol * 100;
+            const _dyFmt = isSh ? '%{y:.3f}' : '%{y:.2f}%';
+            const _dyLbl = isSh ? 'Sharpe' : 'Vol';
             const ptFull = _lastSimulatedDot.data[vk].full;
             const ptH1 = _lastSimulatedDot.data[vk].h1;
             const ptH2 = _lastSimulatedDot.data[vk].h2;
 
             Plotly.addTraces('frontierChart', {
-                x: [ptFull.cagr * 100], y: [ptFull.sharpe],
+                x: [ptFull.cagr * 100], y: [_dyVal(ptFull)],
                 mode: 'markers+text',
                 marker: { size: 12, color: '#f87171', symbol: 'diamond', line: { color: '#fff', width: 1.5 } },
                 text: ['Seu Portfólio'], textposition: 'top center',
                 textfont: { size: 10, color: '#f87171' },
                 name: 'Seu Portfólio',
-                hovertemplate: '<b>Seu Portfólio (completo)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                hovertemplate: '<b>Seu Portfólio (completo)</b><br>CAGR: %{x:.2f}%<br>' + _dyLbl + ': ' + _dyFmt + '<extra></extra>',
             });
             Plotly.addTraces('frontierChart', {
-                x: [ptH1.cagr * 100], y: [ptH1.sharpe],
+                x: [ptH1.cagr * 100], y: [_dyVal(ptH1)],
                 mode: 'markers',
                 marker: { size: 8, color: '#fb923c', symbol: 'diamond-open', line: { width: 2 } },
                 showlegend: false,
-                hovertemplate: '<b>Seu Portfólio (1ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                hovertemplate: '<b>Seu Portfólio (1ª metade)</b><br>CAGR: %{x:.2f}%<br>' + _dyLbl + ': ' + _dyFmt + '<extra></extra>',
             });
             Plotly.addTraces('frontierChart', {
-                x: [ptH2.cagr * 100], y: [ptH2.sharpe],
+                x: [ptH2.cagr * 100], y: [_dyVal(ptH2)],
                 mode: 'markers',
                 marker: { size: 8, color: '#a78bfa', symbol: 'diamond-open', line: { width: 2 } },
                 showlegend: false,
-                hovertemplate: '<b>Seu Portfólio (2ª metade)</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<extra></extra>',
+                hovertemplate: '<b>Seu Portfólio (2ª metade)</b><br>CAGR: %{x:.2f}%<br>' + _dyLbl + ': ' + _dyFmt + '<extra></extra>',
             });
         }
 
