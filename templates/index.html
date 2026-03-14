@@ -829,7 +829,7 @@
                             <input class="alloc-input" type="number" id="alloc_${escapeHtml(idx.key)}"
                                    data-key="${escapeHtml(idx.key)}" value="0" min="0" max="100" step="5"
                                    inputmode="decimal" aria-label="Alocação em ${escapeHtml(idx.name)}"
-                                   oninput="updateTotal(); saveState()">
+                                   oninput="clearFrontierSelection(); updateTotal(); saveState()">
                             <span class="alloc-pct">%</span>
                         </div>`;
                     if (descLine) {
@@ -847,9 +847,6 @@
         }
 
         function updateTotal() {
-            // Clear frontier selection when user manually edits allocations
-            _frontierSelectedIdx = -1;
-            document.getElementById('frontierSelected').innerHTML = '<span class="fs-label">Selecione um ponto na fronteira</span>';
             const inputs = document.querySelectorAll('.alloc-input');
             let total = 0;
             let hasInvalid = false;
@@ -1807,7 +1804,16 @@
                 const src = cn === 0 ? full : cn === 1 ? h1 : h2;
                 const fp = src[pt.pointIndex];
                 if (!fp) return;
-                selectFrontierPointFromAllocations(fp.allocations);
+                if (cn === 0) {
+                    selectFrontierPoint(pt.pointIndex);
+                } else {
+                    const periodLabel = cn === 1 ? '1ª metade' : '2ª metade';
+                    selectFrontierPointFromAllocations(fp.allocations);
+                    // Show the composition in the panel
+                    const el = document.getElementById('frontierSelected');
+                    el.innerHTML = `<span class="fs-label">${periodLabel} — CAGR ${(fp.cagr*100).toFixed(2)}% · Sharpe ${fp.sharpe.toFixed(3)} · Vol ${(fp.vol*100).toFixed(2)}%</span>`
+                        + allocTable(fp.allocations);
+                }
             });
 
             // Show previous selection if any
@@ -1816,6 +1822,11 @@
             }
             updatePinnedInfo();
             drawFrontierDot();
+        }
+
+        function clearFrontierSelection() {
+            _frontierSelectedIdx = -1;
+            document.getElementById('frontierSelected').innerHTML = '<span class="fs-label">Selecione um ponto na fronteira</span>';
         }
 
         function selectFrontierPointFromAllocations(allocations) {
