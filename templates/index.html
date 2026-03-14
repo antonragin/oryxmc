@@ -693,6 +693,20 @@
 
         let LAST_RUN_SIGNATURE = null;
 
+        function idxName(key) {
+            const found = INDICES.find(i => i.key === key);
+            return found ? found.name : key;
+        }
+
+        function allocTable(allocations, color) {
+            const c = color || 'var(--accent)';
+            return '<table style="border-collapse:collapse;margin-top:4px;width:100%;">' +
+                Object.entries(allocations)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([k, v]) => `<tr><td style="padding:1px 6px 1px 0;color:${c};font-size:11px;">${escapeHtml(idxName(k))}</td><td style="padding:1px 0;text-align:right;color:var(--text-primary);font-size:11px;font-weight:600;">${Math.round(v*100)}%</td></tr>`)
+                    .join('') + '</table>';
+        }
+
         function escapeHtml(s) {
             return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -1689,7 +1703,7 @@
 
             const _alloc_str = (p) => Object.entries(p.allocations)
                 .sort((a, b) => b[1] - a[1])
-                .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%')
+                .map(([k, v]) => idxName(k) + ' ' + Math.round(v * 100) + '%')
                 .join(', ');
 
             const traces = [];
@@ -1831,11 +1845,8 @@
             if (!full || idx < 0 || idx >= full.length) return;
             const fp = full[idx];
             const el = document.getElementById('frontierSelected');
-            const allocs = Object.entries(fp.allocations)
-                .sort((a, b) => b[1] - a[1])
-                .map(([k, v]) => `<span class="fs-alloc">${k} ${Math.round(v*100)}%</span>`)
-                .join(', ');
-            el.innerHTML = `<span class="fs-label">Ponto ${idx+1}/${full.length} — CAGR ${(fp.cagr*100).toFixed(2)}% · Sharpe ${fp.sharpe.toFixed(3)} · Vol ${(fp.vol*100).toFixed(2)}%</span><br>${allocs}`;
+            el.innerHTML = `<span class="fs-label">Ponto ${idx+1}/${full.length} — CAGR ${(fp.cagr*100).toFixed(2)}% · Sharpe ${fp.sharpe.toFixed(3)} · Vol ${(fp.vol*100).toFixed(2)}%</span>`
+                + allocTable(fp.allocations);
         }
 
         function pinCurrentPortfolio() {
@@ -1854,11 +1865,11 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ allocations: allocs }),
             }).then(r => r.json()).then(data => {
-                const allocStr = Object.entries(allocs)
+                const hoverStr = Object.entries(allocs)
                     .sort((a, b) => b[1] - a[1])
-                    .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%')
+                    .map(([k, v]) => idxName(k) + ' ' + Math.round(v * 100) + '%')
                     .join(', ');
-                _pinnedPortfolio = { allocs, label: allocStr, data };
+                _pinnedPortfolio = { allocs, label: hoverStr, data };
                 document.getElementById('unpinPortfolioBtn').style.display = '';
                 document.getElementById('pinPortfolioBtn').textContent = 'Atualizar fixado';
                 updatePinnedInfo();
@@ -1882,8 +1893,8 @@
             el.style.display = '';
             el.innerHTML = '<span class="fs-label" style="color:#4ade80;">&#9632; Fixado — CAGR '
                 + (pt.cagr * 100).toFixed(2) + '% · Sharpe ' + pt.sharpe.toFixed(3)
-                + ' · Vol ' + (pt.vol * 100).toFixed(2) + '%</span><br>'
-                + '<span class="fs-alloc" style="color:rgba(74,222,128,0.8);">' + _pinnedPortfolio.label + '</span>';
+                + ' · Vol ' + (pt.vol * 100).toFixed(2) + '%</span>'
+                + allocTable(_pinnedPortfolio.allocs, 'rgba(74,222,128,0.8)');
         }
 
         function saveCurrentPortfolioDot() {
