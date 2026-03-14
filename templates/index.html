@@ -847,6 +847,9 @@
         }
 
         function updateTotal() {
+            // Clear frontier selection when user manually edits allocations
+            _frontierSelectedIdx = -1;
+            document.getElementById('frontierSelected').innerHTML = '<span class="fs-label">Selecione um ponto na fronteira</span>';
             const inputs = document.querySelectorAll('.alloc-input');
             let total = 0;
             let hasInvalid = false;
@@ -1701,10 +1704,10 @@
                 if (full[i].sharpe > full[bestIdx].sharpe) bestIdx = i;
             }
 
-            const _alloc_str = (p) => Object.entries(p.allocations)
+            const _alloc_hover = (p) => Object.entries(p.allocations)
                 .sort((a, b) => b[1] - a[1])
-                .map(([k, v]) => idxName(k) + ' ' + Math.round(v * 100) + '%')
-                .join(', ');
+                .map(([k, v]) => idxName(k) + ': ' + Math.round(v * 100) + '%')
+                .join('<br>');
 
             const traces = [];
 
@@ -1714,7 +1717,7 @@
                 mode: 'lines+markers',
                 line: { color: '#22d3ee', width: 2.5 },
                 marker: { size: 6, color: '#22d3ee' },
-                customdata: full.map(p => [_alloc_str(p), (p.vol * 100).toFixed(2) + '%']),
+                customdata: full.map(p => [_alloc_hover(p), (p.vol * 100).toFixed(2) + '%']),
                 hovertemplate: '<b>CAGR: %{x:.2f}%</b><br>Sharpe: %{y:.3f}<br>Vol: %{customdata[1]}<br>%{customdata[0]}<extra></extra>',
                 name: 'Período completo',
             });
@@ -1724,7 +1727,7 @@
                 x: h1.map(p => p.cagr * 100), y: h1.map(p => p.sharpe),
                 mode: 'lines',
                 line: { color: '#fb923c', width: 1.2, dash: 'dash' },
-                customdata: h1.map(p => [_alloc_str(p), (p.vol * 100).toFixed(2) + '%']),
+                customdata: h1.map(p => [_alloc_hover(p), (p.vol * 100).toFixed(2) + '%']),
                 hovertemplate: '<b>1ª metade</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<br>%{customdata[0]}<extra></extra>',
                 name: '1ª metade (' + (periods.h1 || '') + ')',
             });
@@ -1734,7 +1737,7 @@
                 x: h2.map(p => p.cagr * 100), y: h2.map(p => p.sharpe),
                 mode: 'lines',
                 line: { color: '#a78bfa', width: 1.2, dash: 'dash' },
-                customdata: h2.map(p => [_alloc_str(p), (p.vol * 100).toFixed(2) + '%']),
+                customdata: h2.map(p => [_alloc_hover(p), (p.vol * 100).toFixed(2) + '%']),
                 hovertemplate: '<b>2ª metade</b><br>CAGR: %{x:.2f}%<br>Sharpe: %{y:.3f}<br>%{customdata[0]}<extra></extra>',
                 name: '2ª metade (' + (periods.h2 || '') + ')',
             });
@@ -1799,8 +1802,12 @@
             chartEl.on('plotly_click', function(eventData) {
                 if (RUNNING) return;
                 const pt = eventData.points[0];
-                if (pt.curveNumber !== 0) return;
-                selectFrontierPoint(pt.pointIndex);
+                const cn = pt.curveNumber;
+                if (cn > 2) return; // only frontier lines (0=full, 1=h1, 2=h2)
+                const src = cn === 0 ? full : cn === 1 ? h1 : h2;
+                const fp = src[pt.pointIndex];
+                if (!fp) return;
+                selectFrontierPointFromAllocations(fp.allocations);
             });
 
             // Show previous selection if any
@@ -1811,19 +1818,12 @@
             drawFrontierDot();
         }
 
-        function selectFrontierPoint(idx) {
-            if (RUNNING || !FRONTIER_DATA) return;
-            const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
-            const full = FRONTIER_DATA[vk]?.full;
-            if (!full || idx < 0 || idx >= full.length) return;
-            const fp = full[idx];
-            _frontierSelectedIdx = idx;
-
-            // Fill allocations — round to integers, fix remainder on largest weight
+        function selectFrontierPointFromAllocations(allocations) {
+            if (RUNNING) return;
             const rounded = {};
             let roundedSum = 0;
             let maxKey = null, maxVal = 0;
-            for (const [k, v] of Object.entries(fp.allocations)) {
+            for (const [k, v] of Object.entries(allocations)) {
                 const r = Math.round(v * 100);
                 rounded[k] = r;
                 roundedSum += r;
@@ -1833,10 +1833,20 @@
             document.querySelectorAll('.alloc-input').forEach(inp => {
                 inp.value = rounded[inp.dataset.key] || 0;
             });
-            showFrontierSelection(idx);
             updateTotal();
             saveState();
             setTimeout(() => { if (!document.getElementById('runBtn').disabled) runSimulation(); }, 50);
+        }
+
+        function selectFrontierPoint(idx) {
+            if (RUNNING || !FRONTIER_DATA) return;
+            const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
+            const full = FRONTIER_DATA[vk]?.full;
+            if (!full || idx < 0 || idx >= full.length) return;
+            selectFrontierPointFromAllocations(full[idx].allocations);
+            // Re-set after updateTotal clears it
+            _frontierSelectedIdx = idx;
+            showFrontierSelection(idx);
         }
 
         function showFrontierSelection(idx) {
