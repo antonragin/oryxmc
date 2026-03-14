@@ -1816,9 +1816,14 @@
                 }
             });
 
-            // Show previous selection if any
+            // Show previous selection or last-simulated portfolio
             if (_frontierSelectedIdx >= 0 && _frontierSelectedIdx < full.length) {
                 showFrontierSelection(_frontierSelectedIdx);
+            } else if (_lastSimulatedDot) {
+                const pt = _lastSimulatedDot.data[vk].full;
+                const el = document.getElementById('frontierSelected');
+                el.innerHTML = `<span class="fs-label">Seu Portfólio — CAGR ${(pt.cagr*100).toFixed(2)}% · Sharpe ${pt.sharpe.toFixed(3)} · Vol ${(pt.vol*100).toFixed(2)}%</span>`
+                    + allocTable(_lastSimulatedDot.allocs);
             }
             updatePinnedInfo();
             drawFrontierDot();
@@ -1933,8 +1938,14 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ allocations: allocs }),
             }).then(r => r.json()).then(data => {
-                _lastSimulatedDot = { data };
+                _lastSimulatedDot = { data, allocs };
                 drawFrontierDot();
+                // Show composition in the panel
+                const vk = _frontierView === 'nominal' ? 'nominal' : 'real';
+                const pt = data[vk].full;
+                const el = document.getElementById('frontierSelected');
+                el.innerHTML = `<span class="fs-label">Seu Portfólio — CAGR ${(pt.cagr*100).toFixed(2)}% · Sharpe ${pt.sharpe.toFixed(3)} · Vol ${(pt.vol*100).toFixed(2)}%</span>`
+                    + allocTable(allocs);
             }).catch(() => {});
         }
 
